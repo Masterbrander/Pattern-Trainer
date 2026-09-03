@@ -80,6 +80,7 @@
             <div class="review-actions">
               <button id="prevWeek" class="small-btn">←</button>
               <button id="nextWeek" class="small-btn">→</button>
+              <button id="exportReport" class="small-btn">Export PDF</button>
               <button id="printReview" class="small-btn">Print</button>
             </div>
           </div>
@@ -212,7 +213,11 @@
         <h3>Backup & restore</h3>
         <button class="icon-btn" data-action="close-backup">×</button>
       </div>
-      <p>Your entries stay in this browser on this device unless you export them.</p>
+      <p><strong id="syncStatus">Cloud sync starting…</strong></p><p>Entries stay on this device for offline use and automatically sync to your private app dataset when connected.</p>
+      <button id="syncNow" class="secondary wide">Sync now</button>
+      <div class="form-group sync-box"><label for="syncIdInput">Sync ID</label><input id="syncIdInput" autocomplete="off" autocapitalize="off" spellcheck="false"><small>Use the same Sync ID on your phone and computer to share one history.</small></div>
+      <button id="copySyncId" class="secondary wide">Copy this Sync ID</button>
+      <button id="connectSyncId" class="secondary wide">Connect using this Sync ID</button>
       <button id="exportJson" class="primary wide">Export backup</button>
       <label class="secondary wide file-button">Restore backup<input type="file" id="importJson" accept="application/json"></label>
       <button id="clearAll" class="danger wide">Erase all local data</button>

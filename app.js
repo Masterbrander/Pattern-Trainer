@@ -29,18 +29,18 @@ function txStore(mode='readonly'){ return db.transaction(STORE,mode).objectStore
 function getAllEntries(){
   return new Promise((resolve,reject)=>{
     const req = txStore().getAll();
-    req.onsuccess=()=>resolve(req.result.sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)));
+    req.onsuccess=()=>resolve(req.result.filter(x=>!x._deleted).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)));
     req.onerror=()=>reject(req.error);
   });
 }
-function putEntry(entry){
+function putEntryLocal(entry){
   return new Promise((resolve,reject)=>{
     const req = txStore('readwrite').put(entry);
     req.onsuccess=()=>resolve(entry);
     req.onerror=()=>reject(req.error);
   });
 }
-function deleteById(id){
+function deleteByIdLocal(id){
   return new Promise((resolve,reject)=>{
     const req = txStore('readwrite').delete(id);
     req.onsuccess=()=>resolve();
@@ -53,6 +53,86 @@ function clearDB(){
     req.onsuccess=()=>resolve();
     req.onerror=()=>reject(req.error);
   });
+}
+
+// V3 cloud sync. A random sync ID acts as the shared key between your devices.
+// The browser never receives a database admin key; sync goes through a small Edge Function.
+const SUPABASE_URL = 'https://ykjqohkotetayuowaary.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_SgFpVT105b1iMn-3twav9Q_gk2cCKPo';
+const SYNC_URL = `${SUPABASE_URL}/functions/v1/pattern-sync`;
+function getDeviceId(){
+  let id=localStorage.getItem('patternTrainerSyncId');
+  if(!id){ id=uuid(); localStorage.setItem('patternTrainerSyncId',id); }
+  return id;
+}
+function setDeviceId(id){
+  const clean=String(id||'').trim();
+  if(!/^[a-zA-Z0-9._-]{20,100}$/.test(clean)) throw new Error('Invalid sync ID');
+  localStorage.setItem('patternTrainerSyncId',clean);
+  const input=qs('#syncIdInput'); if(input) input.value=clean;
+}
+function syncHeaders(){ return {'apikey':SUPABASE_KEY,'Content-Type':'application/json'}; }
+function toCloud(e){return {
+  id:e.id, device_id:getDeviceId(), timestamp:e.timestamp, level:e.level, emotion:e.emotion||null,
+  event:e.event||null, thought:e.thought||null, physical_cues:e.physicalCues||null,
+  behavioral_cues:e.behavioralCues||null, emotional_cues:e.emotionalCues||null, cognitive_cues:e.cognitiveCues||null,
+  consequence:e.consequence||null, strategy:e.strategy||null, realistic:e.realistic||null, future:e.future||null,
+  updated_at:e.updatedAt||new Date().toISOString(), deleted:!!e._deleted
+};}
+function fromCloud(x){return {id:x.id,timestamp:x.timestamp,level:x.level,emotion:x.emotion||'',event:x.event||'',thought:x.thought||'',physicalCues:x.physical_cues||'',behavioralCues:x.behavioral_cues||'',emotionalCues:x.emotional_cues||'',cognitiveCues:x.cognitive_cues||'',consequence:x.consequence||'',strategy:x.strategy||'',realistic:x.realistic||'',future:x.future||'',updatedAt:x.updated_at,_deleted:!!x.deleted};}
+async function callSync(body){
+  const r=await fetch(SYNC_URL,{method:'POST',headers:syncHeaders(),body:JSON.stringify({...body,syncId:getDeviceId()})});
+  if(!r.ok) throw new Error('sync failed');
+  return r.json();
+}
+async function cloudUpsert(entry){
+  await callSync({action:'upsert',entry:toCloud(entry)});
+}
+async function getAllRecords(){
+  return new Promise((resolve,reject)=>{
+    const req=txStore().getAll();
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function syncCloud(){
+  setSyncStatus('Syncing…');
+  try{
+    const local=await getAllRecords();
+    const pulled=await callSync({action:'pull'});
+    const remote=(pulled.entries||[]).map(fromCloud);
+    const remoteById=new Map(remote.map(x=>[x.id,x]));
+    const localById=new Map(local.map(x=>[x.id,x]));
+
+    // Merge newest copy first, including deletion tombstones.
+    for(const r of remote){
+      const l=localById.get(r.id);
+      if(!l || new Date(r.updatedAt||0)>new Date(l.updatedAt||0)) await putEntryLocal(r);
+    }
+    // Push local records only when they are newer than the cloud copy.
+    for(const l of local){
+      const r=remoteById.get(l.id);
+      if(!r || new Date(l.updatedAt||0)>new Date(r.updatedAt||0)) await cloudUpsert(l);
+    }
+    setSyncStatus(`Synced • ${new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`);
+    await refreshHome();
+    const active=qsa('.view.active')[0]?.id;
+    if(active==='historyView') await refreshHistory();
+    if(active==='reviewView') await refreshReview();
+  }catch(e){ setSyncStatus('Offline • saved on this device'); }
+}
+function setSyncStatus(t){ const el=qs('#syncStatus'); if(el) el.textContent=t; }
+function shareSyncId(){
+  const id=getDeviceId();
+  navigator.clipboard?.writeText(id).catch(()=>{});
+  return id;
+}
+async function putEntry(entry){ await putEntryLocal({...entry,_deleted:false}); cloudUpsert({...entry,_deleted:false}).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Offline • saved on this device')); return entry; }
+async function deleteById(id){
+  const all=await getAllRecords(); const e=all.find(x=>x.id===id); if(!e)return;
+  const tomb={...e,_deleted:true,updatedAt:new Date().toISOString()};
+  await putEntryLocal(tomb);
+  cloudUpsert(tomb).catch(()=>setSyncStatus('Offline • deletion will sync later'));
 }
 function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random(); }
 function pad(n){ return String(n).padStart(2,'0'); }
@@ -309,6 +389,23 @@ function downloadBlob(blob, filename){
   setTimeout(()=>URL.revokeObjectURL(a.href),1000);
 }
 
+
+function exportWeeklyReport(){
+  const entriesPromise=getAllEntries();
+  entriesPromise.then(entries=>{
+    const s=startOfWeek(reviewAnchor), e=endOfWeek(reviewAnchor), week=within(entries,s,e);
+    const endLabel=new Date(e); endLabel.setDate(endLabel.getDate()-1);
+    const early=week.length?Math.round(100*week.filter(x=>x.level<=3).length/week.length):0;
+    const avg=week.length?(week.reduce((a,b)=>a+b.level,0)/week.length).toFixed(1):'0';
+    const high=week.length?Math.max(...week.map(x=>x.level)):0;
+    const patt=v=>topPhrases(v).map(x=>`${x.text}${x.count>1?' ×'+x.count:''}`).join(', ')||'Not enough data yet';
+    const esc=t=>String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const incidents=week.map(x=>`<tr><td>${esc(formatEntryTime(x.timestamp))}</td><td>${esc(x.emotion)}</td><td>${x.level}</td><td>${esc(x.event)}</td><td>${esc(x.thought)}</td><td>${esc(x.strategy)}</td></tr>`).join('');
+    const w=window.open('','_blank');
+    w.document.write(`<!doctype html><title>Pattern Trainer Weekly Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Weekly Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${week.length}</b>Entries</div><div class=m><b>${early}%</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(week.map(x=>x.emotion)))}</p><p><b>Triggers:</b> ${esc(patt(week.map(x=>x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(week.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(week)))}</p><p><b>Strategies:</b> ${esc(patt(week.map(x=>x.strategy)))}</p></div><h2>Incident log</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table><p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
+  });
+}
+
 function registerEvents(){
   qsa('[data-nav]').forEach(b=>b.addEventListener('click',()=>showView(b.dataset.nav)));
   qsa('[data-action="new-entry"]').forEach(b=>b.addEventListener('click',()=>openNew(false)));
@@ -350,9 +447,21 @@ function registerEvents(){
   qs('#prevWeek').addEventListener('click',()=>{reviewAnchor.setDate(reviewAnchor.getDate()-7);refreshReview();});
   qs('#nextWeek').addEventListener('click',()=>{reviewAnchor.setDate(reviewAnchor.getDate()+7);refreshReview();});
   qs('#printReview').addEventListener('click',()=>window.print());
+  qs('#exportReport').addEventListener('click',exportWeeklyReport);
 
   qs('#backupBtn').addEventListener('click',()=>qs('#backupModal').classList.remove('hidden'));
   qsa('[data-action="close-backup"]').forEach(b=>b.addEventListener('click',()=>qs('#backupModal').classList.add('hidden')));
+
+  qs('#syncNow').addEventListener('click',syncCloud);
+  qs('#copySyncId').addEventListener('click',()=>{shareSyncId();alert('Sync ID copied. Paste it into Pattern Trainer on your other device.');});
+  qs('#connectSyncId').addEventListener('click',async()=>{
+    try{
+      const id=qs('#syncIdInput').value;
+      if(id===getDeviceId()){ await syncCloud(); return; }
+      if(!confirm('Connect this device to that cloud history? Local entries will be merged, not erased.')) return;
+      setDeviceId(id); await syncCloud(); alert('Connected. This device now shares the same Pattern Trainer history.');
+    }catch(e){ alert('That sync ID does not look valid. Copy it directly from your other device.'); }
+  });
 
   qs('#exportJson').addEventListener('click',async()=>{
     const entries=await getAllEntries();
@@ -370,7 +479,7 @@ function registerEvents(){
     e.target.value='';
   });
   qs('#clearAll').addEventListener('click',async()=>{
-    if(confirm('Erase every saved entry from this device? This cannot be undone unless you exported a backup.')){
+    if(confirm('Erase local copies from this device? Cloud copies will download again on the next sync.')){
       await clearDB();qs('#backupModal').classList.add('hidden');refreshHome();
     }
   });
@@ -382,7 +491,10 @@ function registerEvents(){
   setEmotion('Irritation');
   await openDB();
   registerEvents();
+  qs('#syncIdInput').value=getDeviceId();
   refreshHome();
+  syncCloud();
+  window.addEventListener('online',syncCloud);
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   }

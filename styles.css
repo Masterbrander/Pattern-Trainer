@@ -148,3 +148,4 @@ textarea:focus,input:focus{border-color:#4b6a86}
 .emotion-buttons button.selected{outline:2px solid var(--accent);border-color:transparent}
 .emotion-other{margin-top:9px}
 .entry-emotion{font-size:.78rem;color:var(--accent2);font-weight:800;margin-bottom:5px}
+.sync-box{margin:14px 0}.sync-box input{width:100%;font-size:12px}.sync-box small{display:block;margin-top:6px;opacity:.72;line-height:1.35}
