@@ -26,14 +26,18 @@ function openDB(){
   });
 }
 function txStore(mode='readonly'){ return db.transaction(STORE,mode).objectStore(STORE); }
+function currentUserId(){ return getSavedSession()?.user?.id || null; }
 function getAllEntries(){
   return new Promise((resolve,reject)=>{
+    const owner=currentUserId();
     const req = txStore().getAll();
-    req.onsuccess=()=>resolve(req.result.filter(x=>!x._deleted).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)));
+    req.onsuccess=()=>resolve(req.result.filter(x=>!x._deleted && x._owner===owner).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)));
     req.onerror=()=>reject(req.error);
   });
 }
 function putEntryLocal(entry){
+  const owner=currentUserId();
+  entry={...entry,_owner:entry._owner||owner};
   return new Promise((resolve,reject)=>{
     const req = txStore('readwrite').put(entry);
     req.onsuccess=()=>resolve(entry);
@@ -55,47 +59,124 @@ function clearDB(){
   });
 }
 
-// V3 cloud sync. A random sync ID acts as the shared key between your devices.
-// The browser never receives a database admin key; sync goes through a small Edge Function.
+// V4 account sync. Supabase Auth handles identity; the app keeps an offline copy per signed-in user.
 const SUPABASE_URL = 'https://ykjqohkotetayuowaary.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_SgFpVT105b1iMn-3twav9Q_gk2cCKPo';
-const SYNC_URL = `${SUPABASE_URL}/functions/v1/pattern-sync`;
-function getDeviceId(){
-  let id=localStorage.getItem('patternTrainerSyncId');
-  if(!id){ id=uuid(); localStorage.setItem('patternTrainerSyncId',id); }
-  return id;
+const AUTH_URL = `${SUPABASE_URL}/auth/v1`;
+const AUTH_EDGE_URL = `${SUPABASE_URL}/functions/v1/pattern-auth`;
+const SYNC_URL = `${SUPABASE_URL}/functions/v1/pattern-sync-v4`;
+const SESSION_KEY = 'patternTrainerSessionV4';
+
+function getSavedSession(){
+  try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{return null;}
 }
-function setDeviceId(id){
-  const clean=String(id||'').trim();
-  if(!/^[a-zA-Z0-9._-]{20,100}$/.test(clean)) throw new Error('Invalid sync ID');
-  localStorage.setItem('patternTrainerSyncId',clean);
-  const input=qs('#syncIdInput'); if(input) input.value=clean;
+function saveSession(session){
+  if(session){
+    if(!session.expires_at && session.expires_in) session.expires_at=Math.floor(Date.now()/1000)+Number(session.expires_in);
+    localStorage.setItem(SESSION_KEY,JSON.stringify(session));
+  }else localStorage.removeItem(SESSION_KEY);
+  updateAccountUI();
 }
-function syncHeaders(){ return {'apikey':SUPABASE_KEY,'Content-Type':'application/json'}; }
+function accountUsername(){
+  const s=getSavedSession();
+  return s?.user?.user_metadata?.username || (s?.user?.email||'').split('@')[0] || '';
+}
+function internalEmail(username){ return `${String(username||'').trim().toLowerCase()}@users.patterntrainer.local`; }
+function authHeaders(extra={}){ return {'apikey':SUPABASE_KEY,'Content-Type':'application/json',...extra}; }
+async function refreshSession(){
+  const old=getSavedSession();
+  if(!old?.refresh_token) return null;
+  try{
+    const r=await fetch(`${AUTH_URL}/token?grant_type=refresh_token`,{method:'POST',headers:authHeaders(),body:JSON.stringify({refresh_token:old.refresh_token})});
+    if(!r.ok){ if(r.status===400||r.status===401) saveSession(null); return null; }
+    const data=await r.json(); saveSession(data); return data;
+  }catch{return old;}
+}
+async function getAccessToken(){
+  let s=getSavedSession(); if(!s) return null;
+  if(!s.expires_at || Number(s.expires_at)>Math.floor(Date.now()/1000)+60) return s.access_token;
+  if(!navigator.onLine) return s.access_token;
+  s=await refreshSession(); return s?.access_token||null;
+}
+async function signInAccount(username,password){
+  const r=await fetch(`${AUTH_URL}/token?grant_type=password`,{method:'POST',headers:authHeaders(),body:JSON.stringify({email:internalEmail(username),password})});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error('Username or password was not accepted.');
+  saveSession(data); return data;
+}
+async function createAccount(username,password){
+  const r=await fetch(AUTH_EDGE_URL,{method:'POST',headers:authHeaders(),body:JSON.stringify({action:'signup',username,password})});
+  const data=await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(data.error||'Could not create account.');
+  return signInAccount(username,password);
+}
+async function signOutAccount(){
+  const token=await getAccessToken();
+  if(token){ fetch(`${AUTH_URL}/logout`,{method:'POST',headers:authHeaders({Authorization:`Bearer ${token}`})}).catch(()=>{}); }
+  saveSession(null);
+  setSyncStatus('Sign in to sync');
+  await refreshHome();
+  showAuth();
+}
+function showAuth(){ qs('#authModal')?.classList.remove('hidden'); }
+function hideAuth(){ qs('#authModal')?.classList.add('hidden'); }
+function updateAccountUI(){
+  const u=accountUsername();
+  const label=qs('#accountLabel'); if(label) label.textContent=u?`Signed in as ${u}`:'Not signed in';
+  const signout=qs('#signOutBtn'); if(signout) signout.classList.toggle('hidden',!u);
+}
 function toCloud(e){return {
-  id:e.id, device_id:getDeviceId(), timestamp:e.timestamp, level:e.level, emotion:e.emotion||null,
+  id:e.id, device_id:'account-v4', timestamp:e.timestamp, level:e.level, emotion:e.emotion||null,
   event:e.event||null, thought:e.thought||null, physical_cues:e.physicalCues||null,
   behavioral_cues:e.behavioralCues||null, emotional_cues:e.emotionalCues||null, cognitive_cues:e.cognitiveCues||null,
   consequence:e.consequence||null, strategy:e.strategy||null, realistic:e.realistic||null, future:e.future||null,
   updated_at:e.updatedAt||new Date().toISOString(), deleted:!!e._deleted
 };}
-function fromCloud(x){return {id:x.id,timestamp:x.timestamp,level:x.level,emotion:x.emotion||'',event:x.event||'',thought:x.thought||'',physicalCues:x.physical_cues||'',behavioralCues:x.behavioral_cues||'',emotionalCues:x.emotional_cues||'',cognitiveCues:x.cognitive_cues||'',consequence:x.consequence||'',strategy:x.strategy||'',realistic:x.realistic||'',future:x.future||'',updatedAt:x.updated_at,_deleted:!!x.deleted};}
+function fromCloud(x){return {id:x.id,timestamp:x.timestamp,level:x.level,emotion:x.emotion||'',event:x.event||'',thought:x.thought||'',physicalCues:x.physical_cues||'',behavioralCues:x.behavioral_cues||'',emotionalCues:x.emotional_cues||'',cognitiveCues:x.cognitive_cues||'',consequence:x.consequence||'',strategy:x.strategy||'',realistic:x.realistic||'',future:x.future||'',updatedAt:x.updated_at,_deleted:!!x.deleted,_owner:currentUserId()};}
 async function callSync(body){
-  const r=await fetch(SYNC_URL,{method:'POST',headers:syncHeaders(),body:JSON.stringify({...body,syncId:getDeviceId()})});
+  const token=await getAccessToken();
+  if(!token) throw new Error('not signed in');
+  const r=await fetch(SYNC_URL,{method:'POST',headers:authHeaders({Authorization:`Bearer ${token}`}),body:JSON.stringify(body)});
+  if(r.status===401){
+    const refreshed=await refreshSession();
+    if(refreshed?.access_token){
+      const retry=await fetch(SYNC_URL,{method:'POST',headers:authHeaders({Authorization:`Bearer ${refreshed.access_token}`}),body:JSON.stringify(body)});
+      if(!retry.ok) throw new Error('sync failed');
+      return retry.json();
+    }
+  }
   if(!r.ok) throw new Error('sync failed');
   return r.json();
 }
-async function cloudUpsert(entry){
-  await callSync({action:'upsert',entry:toCloud(entry)});
-}
+async function cloudUpsert(entry){ await callSync({action:'upsert',entry:toCloud(entry)}); }
 async function getAllRecords(){
   return new Promise((resolve,reject)=>{
+    const owner=currentUserId();
     const req=txStore().getAll();
-    req.onsuccess=()=>resolve(req.result);
+    req.onsuccess=()=>resolve(req.result.filter(x=>x._owner===owner));
     req.onerror=()=>reject(req.error);
   });
 }
+async function adoptLegacyLocalEntries(){
+  const owner=currentUserId(); if(!owner) return;
+  const key=`patternTrainerLegacyLocalAdopted:${owner}`;
+  if(localStorage.getItem(key)) return;
+  const all=await new Promise((resolve,reject)=>{const req=txStore().getAll();req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});
+  for(const e of all){ if(!e._owner) await putEntryLocal({...e,_owner:owner}); }
+  localStorage.setItem(key,'1');
+}
+async function claimLegacyCloud(){
+  const owner=currentUserId(); if(!owner) return;
+  const key=`patternTrainerLegacyCloudClaimed:${owner}`;
+  if(localStorage.getItem(key)) return;
+  const syncId=localStorage.getItem('patternTrainerSyncId');
+  if(!syncId) { localStorage.setItem(key,'none'); return; }
+  try{ await callSync({action:'claimLegacy',syncId}); localStorage.setItem(key,'1'); }catch{}
+}
+async function prepareAccountData(){ await adoptLegacyLocalEntries(); await claimLegacyCloud(); }
 async function syncCloud(){
+  if(!getSavedSession()){ setSyncStatus('Sign in to sync'); return; }
+  if(!navigator.onLine){ setSyncStatus('Offline • saved on this device'); return; }
   setSyncStatus('Syncing…');
   try{
     const local=await getAllRecords();
@@ -103,13 +184,10 @@ async function syncCloud(){
     const remote=(pulled.entries||[]).map(fromCloud);
     const remoteById=new Map(remote.map(x=>[x.id,x]));
     const localById=new Map(local.map(x=>[x.id,x]));
-
-    // Merge newest copy first, including deletion tombstones.
     for(const r of remote){
       const l=localById.get(r.id);
       if(!l || new Date(r.updatedAt||0)>new Date(l.updatedAt||0)) await putEntryLocal(r);
     }
-    // Push local records only when they are newer than the cloud copy.
     for(const l of local){
       const r=remoteById.get(l.id);
       if(!r || new Date(l.updatedAt||0)>new Date(r.updatedAt||0)) await cloudUpsert(l);
@@ -122,17 +200,21 @@ async function syncCloud(){
   }catch(e){ setSyncStatus('Offline • saved on this device'); }
 }
 function setSyncStatus(t){ const el=qs('#syncStatus'); if(el) el.textContent=t; }
-function shareSyncId(){
-  const id=getDeviceId();
-  navigator.clipboard?.writeText(id).catch(()=>{});
-  return id;
+async function putEntry(entry){
+  const local={...entry,_deleted:false,_owner:currentUserId()};
+  await putEntryLocal(local);
+  if(getSavedSession()) cloudUpsert(local).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Offline • saved on this device'));
+  return local;
 }
-async function putEntry(entry){ await putEntryLocal({...entry,_deleted:false}); cloudUpsert({...entry,_deleted:false}).then(()=>setSyncStatus('Synced')).catch(()=>setSyncStatus('Offline • saved on this device')); return entry; }
 async function deleteById(id){
   const all=await getAllRecords(); const e=all.find(x=>x.id===id); if(!e)return;
-  const tomb={...e,_deleted:true,updatedAt:new Date().toISOString()};
+  const tomb={...e,_deleted:true,updatedAt:new Date().toISOString(),_owner:currentUserId()};
   await putEntryLocal(tomb);
-  cloudUpsert(tomb).catch(()=>setSyncStatus('Offline • deletion will sync later'));
+  if(getSavedSession()) cloudUpsert(tomb).catch(()=>setSyncStatus('Offline • deletion will sync later'));
+}
+
+function clearCurrentAccountLocal(){
+  return getAllRecords().then(rows=>Promise.all(rows.map(r=>deleteByIdLocal(r.id))));
 }
 function uuid(){ return crypto.randomUUID ? crypto.randomUUID() : String(Date.now())+Math.random(); }
 function pad(n){ return String(n).padStart(2,'0'); }
@@ -453,14 +535,34 @@ function registerEvents(){
   qsa('[data-action="close-backup"]').forEach(b=>b.addEventListener('click',()=>qs('#backupModal').classList.add('hidden')));
 
   qs('#syncNow').addEventListener('click',syncCloud);
-  qs('#copySyncId').addEventListener('click',()=>{shareSyncId();alert('Sync ID copied. Paste it into Pattern Trainer on your other device.');});
-  qs('#connectSyncId').addEventListener('click',async()=>{
+  qs('#signOutBtn').addEventListener('click',async()=>{ if(confirm('Sign out on this device? Your cloud history stays in your account.')) await signOutAccount(); });
+
+  let authMode='signin';
+  const setAuthMode=(mode)=>{
+    authMode=mode; const signup=mode==='signup';
+    qs('#authTitle').textContent=signup?'Create your account':'Sign in';
+    qs('#authSubmit').textContent=signup?'Create account':'Sign in';
+    qs('#authToggle').textContent=signup?'I already have an account':'Create a new account';
+    qs('#confirmPasswordWrap').classList.toggle('hidden',!signup);
+    qs('#authMessage').textContent='';
+  };
+  qs('#authToggle').addEventListener('click',()=>setAuthMode(authMode==='signin'?'signup':'signin'));
+  qs('#authForm').addEventListener('submit',async e=>{
+    e.preventDefault();
+    const username=qs('#authUsername').value.trim().toLowerCase();
+    const password=qs('#authPassword').value;
+    const confirmPassword=qs('#authConfirmPassword').value;
+    const msg=qs('#authMessage'); msg.textContent='';
+    if(!/^[a-z0-9][a-z0-9._-]{2,29}$/.test(username)){msg.textContent='Use 3-30 letters, numbers, dots, dashes, or underscores.';return;}
+    if(password.length<8){msg.textContent='Password must be at least 8 characters.';return;}
+    if(authMode==='signup' && password!==confirmPassword){msg.textContent='Passwords do not match.';return;}
+    qs('#authSubmit').disabled=true; msg.textContent=authMode==='signup'?'Creating account…':'Signing in…';
     try{
-      const id=qs('#syncIdInput').value;
-      if(id===getDeviceId()){ await syncCloud(); return; }
-      if(!confirm('Connect this device to that cloud history? Local entries will be merged, not erased.')) return;
-      setDeviceId(id); await syncCloud(); alert('Connected. This device now shares the same Pattern Trainer history.');
-    }catch(e){ alert('That sync ID does not look valid. Copy it directly from your other device.'); }
+      if(authMode==='signup') await createAccount(username,password); else await signInAccount(username,password);
+      await prepareAccountData(); hideAuth(); updateAccountUI(); await syncCloud();
+      qs('#authForm').reset();
+    }catch(err){ msg.textContent=err.message||'Could not sign in.'; }
+    finally{ qs('#authSubmit').disabled=false; }
   });
 
   qs('#exportJson').addEventListener('click',async()=>{
@@ -480,7 +582,7 @@ function registerEvents(){
   });
   qs('#clearAll').addEventListener('click',async()=>{
     if(confirm('Erase local copies from this device? Cloud copies will download again on the next sync.')){
-      await clearDB();qs('#backupModal').classList.add('hidden');refreshHome();
+      await clearCurrentAccountLocal();qs('#backupModal').classList.add('hidden');refreshHome();
     }
   });
 }
@@ -491,10 +593,20 @@ function registerEvents(){
   setEmotion('Irritation');
   await openDB();
   registerEvents();
-  qs('#syncIdInput').value=getDeviceId();
-  refreshHome();
-  syncCloud();
-  window.addEventListener('online',syncCloud);
+  updateAccountUI();
+  if(getSavedSession()){
+    await prepareAccountData();
+    hideAuth();
+    refreshHome();
+    syncCloud();
+  }else{
+    refreshHome();
+    setSyncStatus('Sign in to sync');
+    showAuth();
+  }
+  window.addEventListener('online',()=>{ if(getSavedSession()) syncCloud(); });
+  document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible' && navigator.onLine && getSavedSession()) syncCloud(); });
+  setInterval(()=>{ if(document.visibilityState==='visible' && navigator.onLine && getSavedSession()) syncCloud(); },60000);
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
   }

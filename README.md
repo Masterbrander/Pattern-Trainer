@@ -1,21 +1,15 @@
-# Pattern Trainer v3
+# Pattern Trainer v4
 
-Phone-first PWA for catching anger and negative-thought patterns early.
+Phone-first emotional-pattern awareness PWA with offline capture, weekly review, cloud sync, and real user accounts.
 
-## V3
-- Keeps the fast local/offline capture flow.
-- Automatically syncs entries to the connected Supabase project when online.
-- Uses a random Sync ID so phone and computer can share the same history without an account/login.
-- Offline edits and deletions are retained and sync when the connection returns.
-- Manual Sync Now plus visible sync status.
-- JSON export/restore remains as a second backup.
-- Weekly review can be opened on desktop for screen sharing.
-- Export PDF opens a therapist-friendly weekly report with metrics, patterns, and incident log, then the browser's Save as PDF / Print dialog.
+## V4 changes
+- Username + password accounts using Supabase Auth.
+- Each account has a separate private cloud history.
+- Same login works across phone and desktop, so Sync IDs are no longer needed.
+- Existing V3 local/cloud entries are automatically claimed by the first V4 account used on the upgraded device.
+- Automatic sync on save, app resume, reconnect, app open, and roughly every 60 seconds while the app is active.
+- Local IndexedDB data remains available for offline capture.
+- Service worker now cleans up old Pattern Trainer caches and prefers fresh deployed files when online.
 
-## Connecting another device
-1. On the primary device, open the ⋯ menu and tap Copy this Sync ID.
-2. On the second device, open the same menu, paste it into Sync ID, and choose Connect using this Sync ID.
-3. The two devices then merge and share the same cloud history.
-
-## Updating GitHub Pages
-Replace the seven site files in the existing Pattern-Trainer repository with this V3 set. GitHub Pages will redeploy automatically. Existing local entries remain because V3 uses the same IndexedDB database and GitHub Pages origin as V2.
+## Upgrade
+Upload all files in this folder to the root of the GitHub Pages repository, replacing files with the same names. Do not clear app/site data before first V4 sign-in if you want V3 local history migrated automatically.

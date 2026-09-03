@@ -149,3 +149,12 @@ textarea:focus,input:focus{border-color:#4b6a86}
 .emotion-other{margin-top:9px}
 .entry-emotion{font-size:.78rem;color:var(--accent2);font-weight:800;margin-bottom:5px}
 .sync-box{margin:14px 0}.sync-box input{width:100%;font-size:12px}.sync-box small{display:block;margin-top:6px;opacity:.72;line-height:1.35}
+
+/* V4 account/auth */
+.account-box{display:flex;flex-direction:column;gap:5px;padding:14px;border:1px solid var(--border,#303744);border-radius:14px;margin:12px 0 14px;background:rgba(255,255,255,.03)}
+.account-box strong{font-size:1rem}.account-box span{font-size:.9rem;opacity:.82}.account-box small{opacity:.62;line-height:1.35}
+.auth-modal{z-index:120}.auth-modal .modal-backdrop{backdrop-filter:blur(8px)}
+.auth-card{max-width:430px}.auth-card h2{margin:.3rem 0 .5rem}.auth-intro{margin-top:0;opacity:.82;line-height:1.45}
+.auth-message{min-height:1.35em;margin:-2px 0 10px;font-size:.9rem;color:#ffb7b7}
+.auth-note{font-size:.78rem;opacity:.6;line-height:1.4;margin-bottom:0}
+.auth-card input{width:100%}
