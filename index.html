@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#10131a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <title>Pattern Trainer</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div>
+        <div class="eyebrow">ANGER PATTERN TRAINER</div>
+        <h1 id="pageTitle">Catch it early.</h1>
+      </div>
+      <button id="backupBtn" class="icon-btn" title="Backup / restore">⋯</button>
+    </header>
+
+    <main>
+      <section id="homeView" class="view active">
+        <div class="hero-card">
+          <div class="hero-copy">
+            <div class="hero-kicker">The goal is not “never get angry.”</div>
+            <h2>Notice the first spark.</h2>
+            <p>Catch the thought, body cue, or irritation while it is still small enough to steer.</p>
+          </div>
+          <button class="primary giant" data-action="new-entry">LOG IT</button>
+          <button class="secondary wide" data-action="quick-thought">Catch a thought</button>
+        </div>
+
+        <div class="card stats-card">
+          <div class="section-head">
+            <h3>This week</h3>
+            <button class="text-btn" data-nav="review">Review →</button>
+          </div>
+          <div class="stats-grid">
+            <div><strong id="weekCount">0</strong><span>entries</span></div>
+            <div><strong id="earlyCount">0</strong><span>caught at 1–3</span></div>
+            <div><strong id="highCount">0</strong><span>highest intensity</span></div>
+          </div>
+          <div id="weekNudge" class="nudge">Your first entry will start building your pattern map.</div>
+        </div>
+
+        <div class="card">
+          <div class="section-head">
+            <h3>Recent</h3>
+            <button class="text-btn" data-nav="history">See all →</button>
+          </div>
+          <div id="recentList" class="entry-list empty-state">No entries yet.</div>
+        </div>
+      </section>
+
+      <section id="historyView" class="view">
+        <div class="card filter-card">
+          <div class="segmented">
+            <button data-range="thisWeek" class="active">This week</button>
+            <button data-range="lastWeek">Last week</button>
+            <button data-range="all">All</button>
+          </div>
+          <div class="date-filter">
+            <label>From <input type="date" id="dateFrom"></label>
+            <label>To <input type="date" id="dateTo"></label>
+            <button id="applyDates" class="small-btn">Apply</button>
+          </div>
+        </div>
+        <div id="historyList" class="entry-list empty-state">No entries in this range.</div>
+      </section>
+
+      <section id="reviewView" class="view">
+        <div class="card review-header">
+          <div class="section-head">
+            <div>
+              <div class="eyebrow">WEEKLY REVIEW</div>
+              <h2 id="reviewRangeLabel">This week</h2>
+            </div>
+            <div class="review-actions">
+              <button id="prevWeek" class="small-btn">←</button>
+              <button id="nextWeek" class="small-btn">→</button>
+              <button id="printReview" class="small-btn">Print</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="review-grid">
+          <div class="card metric"><span>Entries</span><strong id="rCount">0</strong></div>
+          <div class="card metric"><span>Caught at 1–3</span><strong id="rEarly">0%</strong></div>
+          <div class="card metric"><span>Highest intensity</span><strong id="rHigh">0</strong></div>
+          <div class="card metric"><span>Average intensity</span><strong id="rAvg">0</strong></div>
+        </div>
+
+        <div class="card">
+          <h3>Patterns</h3>
+          <div class="pattern-block">
+            <div><span>Common starting states</span><div id="emotionPatterns" class="chips"></div></div>
+            <div><span>Common triggers</span><div id="triggerPatterns" class="chips"></div></div>
+            <div><span>Common thoughts</span><div id="thoughtPatterns" class="chips"></div></div>
+            <div><span>Common cues</span><div id="cuePatterns" class="chips"></div></div>
+            <div><span>Strategies used</span><div id="strategyPatterns" class="chips"></div></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Incidents this week</h3>
+          <div id="reviewList" class="entry-list empty-state">No entries this week.</div>
+        </div>
+      </section>
+    </main>
+
+    <nav class="bottom-nav">
+      <button data-nav="home" class="active"><span>⌂</span>Home</button>
+      <button data-nav="history"><span>≡</span>History</button>
+      <button data-action="new-entry" class="nav-log"><span>＋</span>Log</button>
+      <button data-nav="review"><span>▦</span>Review</button>
+    </nav>
+  </div>
+
+  <div id="entrySheet" class="sheet hidden" aria-hidden="true">
+    <div class="sheet-backdrop" data-action="close-sheet"></div>
+    <div class="sheet-panel">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <div>
+          <div class="eyebrow" id="entryModeLabel">QUICK CAPTURE</div>
+          <h2 id="entryHeading">Catch the spark</h2>
+        </div>
+        <button class="icon-btn" data-action="close-sheet">×</button>
+      </div>
+
+      <form id="entryForm">
+        <input type="hidden" id="entryId">
+
+        <div class="form-group">
+          <label>What showed up first?</label>
+          <div id="emotionButtons" class="emotion-buttons"></div>
+          <input id="otherEmotion" class="hidden emotion-other" placeholder="Name the emotion or state">
+        </div>
+
+        <div class="form-group">
+          <label class="label-row">
+            <span>Intensity</span>
+            <strong id="levelDisplay">2</strong>
+          </label>
+          <div id="levelButtons" class="level-buttons"></div>
+          <div class="level-hint"><span>1 = barely noticeable</span><span>10 = overwhelming</span></div>
+        </div>
+
+        <div class="form-group">
+          <label for="eventInput">What happened?</label>
+          <textarea id="eventInput" rows="2" placeholder="Just enough to identify the trigger."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="thoughtInput">What went through your head?</label>
+          <textarea id="thoughtInput" rows="2" placeholder='Example: “Why can’t they just…”'></textarea>
+        </div>
+
+        <button type="button" id="detailsToggle" class="secondary wide">Add more detail</button>
+
+        <div id="detailFields" class="details hidden">
+          <div class="form-group">
+            <label>What did you notice?</label>
+            <div class="cue-grid">
+              <label><span>Physical cues</span><input id="physicalCues" placeholder="Jaw tight, chest, heat…"></label>
+              <label><span>Behavioral cues</span><input id="behavioralCues" placeholder="Voice, pacing, interrupting…"></label>
+              <label><span>Emotional cues</span><input id="emotionalCues" placeholder="Irritated, hurt, anxious…"></label>
+              <label><span>Cognitive cues</span><input id="cognitiveCues" placeholder="Blame, absolutist thought…"></label>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="consequenceInput">What did you feel or do?</label>
+            <textarea id="consequenceInput" rows="2" placeholder="Emotion, reaction, behavior, outcome."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="strategyInput">What did you do to keep it from climbing?</label>
+            <input id="strategyInput" placeholder="Paused, walked away, reframed, breathed…">
+          </div>
+
+          <div class="form-group">
+            <label for="realisticInput">Was the thought realistic or helpful?</label>
+            <textarea id="realisticInput" rows="2"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="futureInput">What could you tell yourself next time?</label>
+            <textarea id="futureInput" rows="2"></textarea>
+          </div>
+
+          <div class="form-group two-col">
+            <label><span>Date</span><input type="date" id="entryDate"></label>
+            <label><span>Time</span><input type="time" id="entryTime"></label>
+          </div>
+        </div>
+
+        <div class="save-row">
+          <button type="button" id="deleteEntry" class="danger hidden">Delete</button>
+          <button type="submit" class="primary">Save entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="backupModal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-backup"></div>
+    <div class="modal-card">
+      <div class="section-head">
+        <h3>Backup & restore</h3>
+        <button class="icon-btn" data-action="close-backup">×</button>
+      </div>
+      <p>Your entries stay in this browser on this device unless you export them.</p>
+      <button id="exportJson" class="primary wide">Export backup</button>
+      <label class="secondary wide file-button">Restore backup<input type="file" id="importJson" accept="application/json"></label>
+      <button id="clearAll" class="danger wide">Erase all local data</button>
+    </div>
+  </div>
+
+  <template id="entryTemplate">
+    <article class="entry-card">
+      <div class="entry-top">
+        <div class="level-pill"></div>
+        <div class="entry-time"></div>
+      </div>
+      <div class="entry-emotion"></div><div class="entry-event"></div>
+      <div class="entry-thought"></div>
+      <div class="entry-cues"></div>
+    </article>
+  </template>
+
+  <script src="app.js"></script>
+</body>
+</html>
