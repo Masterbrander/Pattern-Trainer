@@ -9,14 +9,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Pattern Trainer</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=7.0.0-calm1">
+  <link rel="stylesheet" href="calm.css?v=7.0.0-calm1">
 </head>
 <body>
   <div id="app">
     <header class="topbar">
       <div>
         <div class="eyebrow">ANGER PATTERN TRAINER</div>
-        <h1 id="pageTitle">Catch it early.</h1>
+        <h1 id="pageTitle">Catch it early.</h1><div id="appBuild">v7.0.0 · Calm Mode</div>
       </div>
       <button id="backupBtn" class="icon-btn" title="Backup / restore">⋯</button>
     </header>
@@ -31,6 +32,7 @@
           </div>
           <button class="rant-home giant" data-action="new-rant">🎙 RANT</button>
           <button class="secondary wide" data-action="new-entry">LOG IT</button>
+          <button class="calm-home" data-calm-open="home">CALM DOWN<small>Short spoken guides. No need to figure it all out first.</small></button>
         </div>
 
         <div class="card stats-card">
@@ -112,6 +114,7 @@
           </div>
         </div>
 
+        <div class="card"><h3>Calm sessions in this range</h3><div id="calmReview">No Calm sessions yet.</div></div>
         <div class="card">
           <h3>Incidents in this range</h3>
           <div id="reviewList" class="entry-list empty-state">No entries in this range.</div>
@@ -168,6 +171,7 @@
           <div class="voice-field"><textarea id="thoughtInput" rows="2" placeholder='Example: “Why can’t they just…”'></textarea><button type="button" class="mic-btn" data-dictate-target="thoughtInput" aria-label="Dictate thoughts">🎙</button></div>
         </div>
 
+        <button type="button" class="calm-home" data-calm-open="entry">CALM DOWN</button>
         <button type="button" id="detailsToggle" class="secondary wide">Add more detail</button>
 
         <div id="detailFields" class="details hidden">
@@ -226,6 +230,7 @@
     <div class="sheet-panel rant-panel">
       <div class="sheet-handle"></div>
       <div class="sheet-head"><div><div class="eyebrow">RAW CAPTURE</div><h2>Get it out.</h2></div><button class="icon-btn" data-action="close-rant">×</button></div>
+      <button type="button" class="calm-home" data-calm-open="rant">CALM DOWN · keep this rant</button>
       <p class="rant-help">Say it however it comes out. The raw transcript stays raw unless you edit or delete it later.</p>
       <div class="record-zone">
         <button id="rantRecordBtn" type="button" class="rant-record">🎙 START RANT</button>
@@ -265,6 +270,8 @@
         <span id="syncStatus">Cloud sync starting…</span>
         <small>Your account keeps your phone and computer on the same private history automatically.</small>
       </div>
+      <span id="calmSyncStatus">Calm: not synced yet.</span>
+      <button id="checkAppUpdate" class="secondary wide">Check for app update</button>
       <button id="syncNow" class="secondary wide">Sync now</button>
       <button id="signOutBtn" class="secondary wide">Sign out</button>
       <button id="exportJson" class="primary wide">Export backup</button>
@@ -276,9 +283,9 @@
   <div id="authModal" class="modal auth-modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-card auth-card">
-      <div class="eyebrow">PATTERN TRAINER V6</div>
+      <div class="eyebrow">PATTERN TRAINER V7</div>
       <h2 id="authTitle">Sign in</h2>
-      <p class="auth-intro">One username and password now connects your history on every device. Civilization advances by inches.</p>
+      <p class="auth-intro">One username and password now connects your history on every device. Use the same account on your phone and computer.</p>
       <form id="authForm">
         <div class="form-group">
           <label for="authUsername">Username</label>
@@ -296,6 +303,7 @@
         <button id="authSubmit" type="submit" class="primary wide">Sign in</button>
         <button id="authToggle" type="button" class="secondary wide">Create a new account</button>
       </form>
+      <button type="button" class="calm-home" data-calm-open="guest">Use Calm without signing in</button>
       <p class="auth-note">Your entries are still stored locally for offline use. Signing in controls which private cloud history this device syncs with.</p>
     </div>
   </div>
@@ -312,6 +320,10 @@
     </article>
   </template>
 
-  <script src="app.js"></script>
+  <script src="calm-content.js?v=7.0.0-calm1"></script>
+<script src="calm-core.js?v=7.0.0-calm1"></script>
+<script src="calm-store.js?v=7.0.0-calm1"></script>
+<script src="calm.js?v=7.0.0-calm1"></script>
+<script src="app.js?v=7.0.0-calm1"></script>
 </body>
 </html>

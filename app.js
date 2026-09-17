@@ -78,11 +78,13 @@ function getSavedSession(){
   try{return JSON.parse(localStorage.getItem(SESSION_KEY)||'null');}catch{return null;}
 }
 function saveSession(session){
+  const previousId=getSavedSession()?.user?.id;
   if(session){
     if(!session.expires_at && session.expires_in) session.expires_at=Math.floor(Date.now()/1000)+Number(session.expires_in);
     localStorage.setItem(SESSION_KEY,JSON.stringify(session));
   }else localStorage.removeItem(SESSION_KEY);
   updateAccountUI();
+  if(previousId!==session?.user?.id)window.dispatchEvent(new Event('pattern:account-change'));
 }
 function accountUsername(){
   const s=getSavedSession();
@@ -90,13 +92,19 @@ function accountUsername(){
 }
 function internalEmail(username){ return `${String(username||'').trim().toLowerCase()}@users.patterntrainer.local`; }
 function authHeaders(extra={}){ return {'apikey':SUPABASE_KEY,'Content-Type':'application/json',...extra}; }
+let authRefreshPromise=null;
 async function refreshSession(){
+  if(authRefreshPromise)return authRefreshPromise;
+  authRefreshPromise=refreshSessionOnce();
+  try{return await authRefreshPromise;}finally{authRefreshPromise=null;}
+}
+async function refreshSessionOnce(){
   const old=getSavedSession();
   if(!old?.refresh_token) return null;
   try{
     const r=await fetch(`${AUTH_URL}/token?grant_type=refresh_token`,{method:'POST',headers:authHeaders(),body:JSON.stringify({refresh_token:old.refresh_token})});
-    if(!r.ok){ if(r.status===400||r.status===401) saveSession(null); return null; }
-    const data=await r.json(); saveSession(data); return data;
+    if(!r.ok){ if((r.status===400||r.status===401)&&getSavedSession()?.refresh_token===old.refresh_token) saveSession(null); return null; }
+    const data=await r.json(); if(getSavedSession()?.refresh_token!==old.refresh_token)return getSavedSession(); saveSession(data); return data;
   }catch{return old;}
 }
 async function getAccessToken(){
@@ -409,6 +417,7 @@ async function refreshReview(){
   renderPattern('#cuePatterns',cueValues(rangeEntries));
   renderPattern('#strategyPatterns',rangeEntries.map(x=>x.strategy));
   renderList(qs('#reviewList'),rangeEntries,'No entries in this range.');
+  if(window.PatternCalm) await PatternCalm.renderReview(s,e);
 }
 
 function showView(name){
@@ -585,7 +594,9 @@ function downloadBlob(blob, filename){
 
 function exportRangeReport(){
   ensureReviewRange();
-  getAllEntries().then(entries=>{
+  const w=window.open('','_blank');
+  if(!w){alert('Allow a popup for the printable report, then try again.');return;}
+  getAllEntries().then(async entries=>{
     const s=new Date(reviewStart), e=new Date(reviewEnd), rangeEntries=within(entries,s,e);
     const endLabel=new Date(e); endLabel.setDate(endLabel.getDate()-1);
     const early=rangeEntries.length?Math.round(100*rangeEntries.filter(x=>x.level<=3).length/rangeEntries.length):0;
@@ -594,9 +605,24 @@ function exportRangeReport(){
     const patt=v=>topPhrases(v).map(x=>`${x.text}${x.count>1?' ×'+x.count:''}`).join(', ')||'Not enough data yet';
     const esc=t=>String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
     const incidents=rangeEntries.map(x=>`<tr><td>${esc(formatEntryTime(x.timestamp))}</td><td>${esc(x.emotion)}</td><td>${x.level}</td><td>${esc(x.event)}</td><td>${esc(x.thought)}</td><td>${esc(x.strategy)}</td></tr>`).join('');
-    const w=window.open('','_blank');
-    w.document.write(`<!doctype html><title>Pattern Trainer Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${rangeEntries.length}</b>Entries</div><div class=m><b>${early}%</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div><div class=m><b>${deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length}</b>Deleted rants</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[]))))}</p><p><b>Triggers:</b> ${esc(patt(rangeEntries.map(x=>x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(rangeEntries.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(rangeEntries)))}</p><p><b>Strategies:</b> ${esc(patt(rangeEntries.map(x=>x.strategy)))}</p></div><h2>Incident log</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table><p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
+    const calmReport=await PatternCalm.reportHTML(s,e);
+    w.document.write(`<!doctype html><title>Pattern Trainer Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}.calm-report{margin-top:26px;padding-top:16px;border-top:2px solid #ccd3dc}.calm-session-line{padding:9px 0;border-bottom:1px solid #ddd;font-size:12px;break-inside:avoid}.calm-session-line span,.calm-footnote{color:#52616c;font-size:11px}.calm-report h2{margin-top:8px}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${rangeEntries.length}</b>Entries</div><div class=m><b>${early}%</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div><div class=m><b>${deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length}</b>Deleted rants</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[]))))}</p><p><b>Triggers:</b> ${esc(patt(rangeEntries.map(x=>x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(rangeEntries.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(rangeEntries)))}</p><p><b>Strategies:</b> ${esc(patt(rangeEntries.map(x=>x.strategy)))}</p></div><h2>Incident log</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table>${calmReport}<p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
   });
+}
+
+function suspendInputForCalm(){
+  if(activeRecognition){
+    const rec=activeRecognition;activeRecognition=null;
+    rec.onresult=null;rec.onerror=null;rec.onend=null;
+    try{rec.abort();}catch{try{rec.stop();}catch{}}
+  }
+  qsa('.mic-btn.listening').forEach(b=>{b.classList.remove('listening');b.textContent='🎙';});
+  if(!qs('#rantSheet').classList.contains('hidden')){
+    localStorage.setItem('patternTrainerRantDraft',qs('#rantTranscript').value);
+    qs('#rantRecordBtn').classList.remove('recording');qs('#rantRecordBtn').textContent='🎙 CONTINUE RANT';
+    qs('#rantRecordingStatus').textContent='Recording stopped for Calm. Your transcript is kept.';
+    qs('#rantRating').classList.remove('hidden');qs('#saveRant').disabled=!qs('#rantTranscript').value.trim();
+  }
 }
 
 function registerEvents(){
@@ -662,7 +688,8 @@ function registerEvents(){
   qs('#backupBtn').addEventListener('click',()=>qs('#backupModal').classList.remove('hidden'));
   qsa('[data-action="close-backup"]').forEach(b=>b.addEventListener('click',()=>qs('#backupModal').classList.add('hidden')));
 
-  qs('#syncNow').addEventListener('click',syncCloud);
+  qs('#syncNow').addEventListener('click',()=>{syncCloud();window.PatternCalm?.sync();});
+  qs('#checkAppUpdate').addEventListener('click',checkAppUpdate);
   qs('#signOutBtn').addEventListener('click',async()=>{ if(confirm('Sign out on this device? Your cloud history stays in your account.')) await signOutAccount(); });
 
   let authMode='signin';
@@ -695,7 +722,7 @@ function registerEvents(){
 
   qs('#exportJson').addEventListener('click',async()=>{
     const entries=await getAllEntries();
-    downloadBlob(new Blob([JSON.stringify({version:1,exportedAt:new Date().toISOString(),entries},null,2)],{type:'application/json'}),`pattern-trainer-backup-${localDateStr(new Date())}.json`);
+    downloadBlob(new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),entries,calmSessions:await PatternCalm.exportData()},null,2)],{type:'application/json'}),`pattern-trainer-backup-${localDateStr(new Date())}.json`);
   });
   qs('#importJson').addEventListener('change',async e=>{
     const file=e.target.files[0]; if(!file)return;
@@ -703,16 +730,35 @@ function registerEvents(){
       const data=JSON.parse(await file.text());
       if(!Array.isArray(data.entries)) throw new Error('Invalid backup');
       for(const entry of data.entries) await putEntry(entry);
-      alert(`Restored ${data.entries.length} entries.`);
+      const calmCount=Array.isArray(data.calmSessions)?await PatternCalm.importData(data.calmSessions):0;
+      PatternCalm.sync();
+      alert(`Restored ${data.entries.length} entries and ${calmCount} Calm sessions.`);
       qs('#backupModal').classList.add('hidden'); refreshHome();
     }catch(err){ alert('Could not restore that backup file.'); }
     e.target.value='';
   });
   qs('#clearAll').addEventListener('click',async()=>{
     if(confirm('Erase local copies from this device? Cloud copies will download again on the next sync.')){
-      await clearCurrentAccountLocal();qs('#backupModal').classList.add('hidden');refreshHome();
+      try{await PatternCalm.clearLocal();await clearCurrentAccountLocal();qs('#backupModal').classList.add('hidden');refreshHome();}catch(e){alert(e.message);}
     }
   });
+}
+
+async function checkAppUpdate(){
+  const button=qs('#checkAppUpdate');button.disabled=true;button.textContent='Checking…';
+  try{
+    const reg=await navigator.serviceWorker?.getRegistration();
+    if(reg)await reg.update();
+    const answer=await fetch('./version.json?check='+Date.now(),{cache:'no-store'});
+    if(!answer.ok)throw new Error('No version response');
+    const info=await answer.json();
+    if(info.version==='7.0.0-calm1'){alert('You are running v7.0.0 Calm Mode.');}
+    else if(confirm('An update is available. Save any open entry first. Reload now?')){
+      if(reg?.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
+      setTimeout(()=>location.reload(),800);
+    }
+  }catch{alert('Could not check for updates. Your saved data has not been changed.');}
+  finally{button.disabled=false;button.textContent='Check for app update';}
 }
 
 function handleDirectLaunch(){
@@ -731,6 +777,7 @@ function handleDirectLaunch(){
   setEmotions(['Irritation']);setRantLevel(2);
   await openDB();
   registerEvents();
+  PatternCalm.init({url:SUPABASE_URL,key:SUPABASE_KEY,owner:currentUserId,token:getAccessToken,stopCapture:suspendInputForCalm});
   updateAccountUI();
   if(getSavedSession()){
     await prepareAccountData();
@@ -747,6 +794,6 @@ function handleDirectLaunch(){
   setInterval(()=>{ if(document.visibilityState==='visible' && navigator.onLine && getSavedSession()) syncCloud(); },60000);
   handleDirectLaunch();
   if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('./service-worker.js').catch(()=>{});
+    navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(reg=>reg.update()).catch(()=>{});
   }
 })();
