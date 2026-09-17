@@ -188,3 +188,7 @@ textarea:focus,input:focus{border-color:#4b6a86}
 .ai-analysis dt{color:var(--muted);font-size:.75rem}
 .ai-analysis dd{margin:2px 0 0}
 .rant-badge{font-size:.68rem;font-weight:900;letter-spacing:.08em;background:rgba(180,35,24,.15);color:#fecaca;border:1px solid rgba(252,165,165,.3);padding:4px 7px;border-radius:999px;margin-right:6px}
+
+/* Rant rating needs room above the sticky Save/Cancel controls. */
+.rant-panel{padding-bottom:calc(150px + env(safe-area-inset-bottom));}
+#rantRating{padding-bottom:24px;}

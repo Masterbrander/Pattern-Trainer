@@ -476,15 +476,63 @@ function startDictation(targetId,button){
 function openCuePicker(type){activeCueType=type;qs('#cuePickerTitle').textContent=`Pick ${type} cues`;const box=qs('#cuePickerOptions');box.innerHTML='';(CUE_OPTIONS[type]||[]).forEach(v=>{const b=document.createElement('button');b.type='button';b.textContent=v;b.addEventListener('click',()=>b.classList.toggle('selected'));box.appendChild(b);});qs('#cuePickerModal').classList.remove('hidden');}
 function applyCuePicker(){if(!activeCueType)return;const id={physical:'physicalCues',behavioral:'behavioralCues',emotional:'emotionalCues'}[activeCueType];const target=qs('#'+id);const selected=qsa('#cuePickerOptions button.selected').map(b=>b.textContent);const existing=target.value.split(',').map(x=>x.trim()).filter(Boolean);target.value=[...new Set([...existing,...selected])].join(', ');qs('#cuePickerModal').classList.add('hidden');}
 function setRantLevel(n){rantLevel=n;qs('#rantLevelDisplay').textContent=n;qsa('#rantLevelButtons button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.level)===n));}
-function openRant(){rantEmotions=[];rantLevel=2;const draft=localStorage.getItem('patternTrainerRantDraft')||'';qs('#rantTranscript').value=draft;qs('#rantRating').classList.toggle('hidden',!draft);qs('#saveRant').disabled=!draft;qs('#rantOtherEmotion').value='';qs('#rantOtherEmotion').classList.add('hidden');qsa('#rantEmotionButtons button').forEach(b=>b.classList.remove('selected'));setRantLevel(2);qs('#rantSheet').classList.remove('hidden');document.body.style.overflow='hidden';}
+let rantResultSlots=[];
+let rantSessionBase='';
+
+function renderRantRecognitionResults(e){
+  // SpeechRecognition re-sends/refines result slots. Replace each slot by index
+  // instead of appending every hypothesis as though it were new speech.
+  for(let i=e.resultIndex;i<e.results.length;i++){
+    rantResultSlots[i]=e.results[i][0].transcript.trim();
+  }
+  const spoken=rantResultSlots.filter(Boolean).join(' ').trim();
+  const text=[rantSessionBase,spoken].filter(Boolean).join(rantSessionBase&&spoken?' ':'');
+  qs('#rantTranscript').value=text;
+  localStorage.setItem('patternTrainerRantDraft',text);
+}
+
+function startRantRecognition(){
+  if(activeRecognition)return;
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){
+    qs('#rantRecordingStatus').textContent='Voice capture is not supported here. You can still type the rant.';
+    return;
+  }
+  const btn=qs('#rantRecordBtn'),status=qs('#rantRecordingStatus');
+  rantSessionBase=qs('#rantTranscript').value.trim();
+  rantResultSlots=[];
+  const rec=new SR();activeRecognition=rec;rec.continuous=true;rec.interimResults=true;rec.lang=navigator.language||'en-US';
+  btn.classList.add('recording');btn.textContent='■ STOP';status.textContent='Recording… say it raw.';
+  rec.onresult=renderRantRecognitionResults;
+  rec.onend=()=>{
+    activeRecognition=null;
+    btn.classList.remove('recording');btn.textContent='🎙 CONTINUE RANT';
+    status.textContent='Stopped. Rate it below, or keep talking.';
+    qs('#rantRating').classList.remove('hidden');
+    qs('#saveRant').disabled=!qs('#rantTranscript').value.trim();
+  };
+  rec.onerror=()=>rec.onend();
+  try{rec.start();}catch{rec.onend();}
+}
+
+function openRant(){
+  rantEmotions=[];rantLevel=2;
+  const draft=localStorage.getItem('patternTrainerRantDraft')||'';
+  qs('#rantTranscript').value=draft;
+  qs('#rantRating').classList.toggle('hidden',!draft);
+  qs('#saveRant').disabled=!draft;
+  qs('#rantOtherEmotion').value='';qs('#rantOtherEmotion').classList.add('hidden');
+  qsa('#rantEmotionButtons button').forEach(b=>b.classList.remove('selected'));
+  setRantLevel(2);qs('#rantSheet').classList.remove('hidden');document.body.style.overflow='hidden';
+  // A user gesture opened Rant Mode, so start listening immediately.
+  setTimeout(()=>startRantRecognition(),0);
+}
 function closeRant(){if(activeRecognition){try{activeRecognition.stop();}catch{}}qs('#rantSheet').classList.add('hidden');document.body.style.overflow='';}
 function toggleRantRecording(){
-  const btn=qs('#rantRecordBtn'),status=qs('#rantRecordingStatus');if(activeRecognition){activeRecognition.stop();return;}
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){alert('Voice capture is not supported by this browser. Android Chrome is recommended.');return;}
-  const target=qs('#rantTranscript'),rec=new SR();activeRecognition=rec;rec.continuous=true;rec.interimResults=true;rec.lang=navigator.language||'en-US';let committed=target.value.trim(),finalText='';btn.classList.add('recording');btn.textContent='■ STOP';status.textContent='Recording… say it raw.';
-  rec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=t+' ';else interim+=t;}target.value=[committed,finalText.trim(),interim.trim()].filter(Boolean).join(committed?' ':'');localStorage.setItem('patternTrainerRantDraft',target.value);};
-  rec.onend=()=>{activeRecognition=null;btn.classList.remove('recording');btn.textContent='🎙 CONTINUE RANT';status.textContent='Stopped. Rate it below, or keep talking.';qs('#rantRating').classList.remove('hidden');qs('#saveRant').disabled=false;};rec.onerror=rec.onend;rec.start();
+  if(activeRecognition){activeRecognition.stop();return;}
+  startRantRecognition();
 }
+
 async function saveRantCapture(){
   const raw=qs('#rantTranscript').value.trim();if(!raw){alert('There is no rant to save yet.');return;}if(qs('#rantRating').classList.contains('hidden')){alert('Stop the rant and rate how you were feeling first.');return;}const custom=qs('#rantOtherEmotion').value.trim();const emotions=[...rantEmotions,...(custom?custom.split(',').map(x=>x.trim()).filter(Boolean):[])];
   localStorage.removeItem('patternTrainerRantDraft');const now=new Date();const entry={id:uuid(),timestamp:now.toISOString(),level:rantLevel,emotions,emotion:emotions.join(', '),entryType:'rant',rawRant:raw,rantStatus:'captured',event:'',thought:'',physicalCues:'',behavioralCues:'',emotionalCues:'',consequence:'',strategy:'',realistic:'',future:'',aiAnalysis:null,updatedAt:now.toISOString()};await putEntry(entry);closeRant();await refreshHome();

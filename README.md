@@ -35,3 +35,8 @@ Upload all files in this folder to the root of the GitHub Pages repository, repl
 ## Direct Rant shortcut
 
 V6 exposes a PWA shortcut named **Rant**. It opens `./?action=rant`, which launches directly into Rant capture. On Samsung/Android, try selecting the Rant app action under the Side button's Double press settings. If Samsung does not expose PWA app actions there, the same URL is ready for a tiny native launcher fallback.
+
+
+### Rant capture fix
+
+Rant now begins listening immediately when opened, recognition hypotheses are replaced by result index instead of repeatedly appended, Stop becomes Continue Rant, and the rating controls have additional clearance above the sticky save bar.
