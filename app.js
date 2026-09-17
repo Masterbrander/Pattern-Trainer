@@ -464,15 +464,50 @@ const CUE_OPTIONS={
   behavioral:['Raised voice','Interrupting','Arguing','Sarcasm','Pacing','Clenched fists','Staring / glaring','Withdrawing / shutting down','Slamming / rough movements','Sending an angry message','Driving more aggressively','Trying to control the situation'],
   emotional:['Hurt','Fear','Anxiety','Embarrassment','Shame','Guilt','Jealousy','Feeling disrespected','Feeling ignored','Feeling rejected','Sadness','Overwhelmed','Helplessness']
 };
+function collapseRecognitionSegments(segments){
+  const out=[];
+  const norm=s=>String(s||'').trim().replace(/\s+/g,' ').toLowerCase();
+  for(const raw of segments.filter(Boolean)){
+    const cur=String(raw).trim().replace(/\s+/g,' ');
+    if(!cur)continue;
+    if(!out.length){out.push(cur);continue;}
+    const prev=out[out.length-1],a=norm(prev),b=norm(cur);
+    // Samsung/Chrome can emit successive FINAL results that are cumulative
+    // ("so" -> "so this" -> "so this is"). Keep only the most complete form.
+    if(b.startsWith(a)){out[out.length-1]=cur;continue;}
+    if(a.startsWith(b))continue;
+    // Also collapse word-overlap between adjacent segments.
+    const aw=a.split(' '),bw=b.split(' ');let overlap=0;
+    for(let n=Math.min(aw.length,bw.length);n>0;n--){
+      if(aw.slice(-n).join(' ')===bw.slice(0,n).join(' ')){overlap=n;break;}
+    }
+    if(overlap){out.push(cur.split(' ').slice(overlap).join(' '));}
+    else out.push(cur);
+  }
+  return out.filter(Boolean).join(' ').replace(/\s+/g,' ').trim();
+}
+
 function startDictation(targetId,button){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR){alert('Voice dictation is not supported by this browser. On Android, Chrome is recommended.');return;}
   if(activeRecognition){try{activeRecognition.stop();}catch{} activeRecognition=null;}
-  const target=qs('#'+targetId);if(!target)return;const rec=new SR();activeRecognition=rec;rec.continuous=true;rec.interimResults=true;rec.lang=navigator.language||'en-US';
-  const base=target.value.trim();let finalText='';button.classList.add('listening');button.textContent='■';
-  rec.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript;if(e.results[i].isFinal)finalText+=t+' ';else interim+=t;}target.value=[base,finalText.trim(),interim.trim()].filter(Boolean).join(base?' ':'');};
-  rec.onend=()=>{button.classList.remove('listening');button.textContent='🎙';activeRecognition=null;};rec.onerror=rec.onend;rec.start();
+  const target=qs('#'+targetId);if(!target)return;
+  const rec=new SR();activeRecognition=rec;
+  // Short field dictation is intentionally one utterance on Android. It is
+  // much more reliable than asking Samsung's Web Speech layer to stay continuous.
+  rec.continuous=false;rec.interimResults=true;rec.lang=navigator.language||'en-US';
+  const base=target.value.trim();let resultSlots=[];
+  button.classList.add('listening');button.textContent='■';
+  rec.onresult=e=>{
+    for(let i=e.resultIndex;i<e.results.length;i++)resultSlots[i]=e.results[i][0].transcript.trim();
+    const spoken=collapseRecognitionSegments(resultSlots);
+    target.value=[base,spoken].filter(Boolean).join(base&&spoken?' ':'');
+  };
+  rec.onend=()=>{button.classList.remove('listening');button.textContent='🎙';activeRecognition=null;};
+  rec.onerror=()=>rec.onend();
+  try{rec.start();}catch{rec.onend();}
 }
+
 function openCuePicker(type){activeCueType=type;qs('#cuePickerTitle').textContent=`Pick ${type} cues`;const box=qs('#cuePickerOptions');box.innerHTML='';(CUE_OPTIONS[type]||[]).forEach(v=>{const b=document.createElement('button');b.type='button';b.textContent=v;b.addEventListener('click',()=>b.classList.toggle('selected'));box.appendChild(b);});qs('#cuePickerModal').classList.remove('hidden');}
 function applyCuePicker(){if(!activeCueType)return;const id={physical:'physicalCues',behavioral:'behavioralCues',emotional:'emotionalCues'}[activeCueType];const target=qs('#'+id);const selected=qsa('#cuePickerOptions button.selected').map(b=>b.textContent);const existing=target.value.split(',').map(x=>x.trim()).filter(Boolean);target.value=[...new Set([...existing,...selected])].join(', ');qs('#cuePickerModal').classList.add('hidden');}
 function setRantLevel(n){rantLevel=n;qs('#rantLevelDisplay').textContent=n;qsa('#rantLevelButtons button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.level)===n));}
@@ -480,12 +515,10 @@ let rantResultSlots=[];
 let rantSessionBase='';
 
 function renderRantRecognitionResults(e){
-  // SpeechRecognition re-sends/refines result slots. Replace each slot by index
-  // instead of appending every hypothesis as though it were new speech.
   for(let i=e.resultIndex;i<e.results.length;i++){
     rantResultSlots[i]=e.results[i][0].transcript.trim();
   }
-  const spoken=rantResultSlots.filter(Boolean).join(' ').trim();
+  const spoken=collapseRecognitionSegments(rantResultSlots);
   const text=[rantSessionBase,spoken].filter(Boolean).join(rantSessionBase&&spoken?' ':'');
   qs('#rantTranscript').value=text;
   localStorage.setItem('patternTrainerRantDraft',text);
