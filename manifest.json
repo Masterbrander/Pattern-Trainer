@@ -13,5 +13,20 @@
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Rant",
+      "short_name": "Rant",
+      "description": "Open Pattern Trainer directly in Rant mode",
+      "url": "./?action=rant",
+      "icons": [
+        {
+          "src": "icon.svg",
+          "sizes": "any",
+          "type": "image/svg+xml"
+        }
+      ]
+    }
   ]
 }

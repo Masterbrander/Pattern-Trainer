@@ -29,8 +29,8 @@
             <h2>Notice the first spark.</h2>
             <p>Catch the thought, body cue, or irritation while it is still small enough to steer.</p>
           </div>
-          <button class="primary giant" data-action="new-entry">LOG IT</button>
-          <button class="secondary wide" data-action="quick-thought">Catch a thought</button>
+          <button class="rant-home giant" data-action="new-rant">🎙 RANT</button>
+          <button class="secondary wide" data-action="new-entry">LOG IT</button>
         </div>
 
         <div class="card stats-card">
@@ -75,15 +75,21 @@
         <div class="card review-header">
           <div class="section-head">
             <div>
-              <div class="eyebrow">WEEKLY REVIEW</div>
+              <div class="eyebrow">REVIEW</div>
               <h2 id="reviewRangeLabel">This week</h2>
             </div>
             <div class="review-actions">
-              <button id="prevWeek" class="small-btn">←</button>
-              <button id="nextWeek" class="small-btn">→</button>
+              <button id="prevWeek" class="small-btn" title="Previous range">←</button>
+              <button id="nextWeek" class="small-btn" title="Next range">→</button>
+              <button id="thisWeekReview" class="small-btn">This week</button>
               <button id="exportReport" class="small-btn">Export PDF</button>
               <button id="printReview" class="small-btn">Print</button>
             </div>
+          </div>
+          <div class="review-range-picker">
+            <label>From <input type="date" id="reviewDateFrom"></label>
+            <label>To <input type="date" id="reviewDateTo"></label>
+            <button id="applyReviewDates" class="small-btn">Apply range</button>
           </div>
         </div>
 
@@ -92,6 +98,7 @@
           <div class="card metric"><span>Caught at 1–3</span><strong id="rEarly">0%</strong></div>
           <div class="card metric"><span>Highest intensity</span><strong id="rHigh">0</strong></div>
           <div class="card metric"><span>Average intensity</span><strong id="rAvg">0</strong></div>
+          <div class="card metric"><span>Deleted rants</span><strong id="rDeletedRants">0</strong></div>
         </div>
 
         <div class="card">
@@ -106,8 +113,8 @@
         </div>
 
         <div class="card">
-          <h3>Incidents this week</h3>
-          <div id="reviewList" class="entry-list empty-state">No entries this week.</div>
+          <h3>Incidents in this range</h3>
+          <div id="reviewList" class="entry-list empty-state">No entries in this range.</div>
         </div>
       </section>
     </main>
@@ -136,7 +143,7 @@
         <input type="hidden" id="entryId">
 
         <div class="form-group">
-          <label>What showed up first?</label>
+          <label>What were you feeling?</label><div class="field-help">Pick everything that fits. You do not have to identify which emotion came first.</div>
           <div id="emotionButtons" class="emotion-buttons"></div>
           <input id="otherEmotion" class="hidden emotion-other" placeholder="Name the emotion or state">
         </div>
@@ -152,45 +159,52 @@
 
         <div class="form-group">
           <label for="eventInput">What happened?</label>
-          <textarea id="eventInput" rows="2" placeholder="Just enough to identify the trigger."></textarea>
+          <div class="voice-field"><textarea id="eventInput" rows="2" placeholder="Just enough to identify the trigger."></textarea><button type="button" class="mic-btn" data-dictate-target="eventInput" aria-label="Dictate what happened">🎙</button></div>
         </div>
 
         <div class="form-group">
           <label for="thoughtInput">What went through your head?</label>
-          <textarea id="thoughtInput" rows="2" placeholder='Example: “Why can’t they just…”'></textarea>
+          <div class="field-help">This is the cognitive cue: the thought, interpretation, image, or story your brain produced.</div>
+          <div class="voice-field"><textarea id="thoughtInput" rows="2" placeholder='Example: “Why can’t they just…”'></textarea><button type="button" class="mic-btn" data-dictate-target="thoughtInput" aria-label="Dictate thoughts">🎙</button></div>
         </div>
 
         <button type="button" id="detailsToggle" class="secondary wide">Add more detail</button>
 
         <div id="detailFields" class="details hidden">
+          <div id="rawRantBlock" class="form-group hidden">
+            <label for="rawRantInput">Raw rant</label>
+            <div class="field-help">Preserved separately from later reflection. Edit it if speech-to-text mangled something.</div>
+            <div class="voice-field"><textarea id="rawRantInput" rows="6"></textarea><button type="button" class="mic-btn" data-dictate-target="rawRantInput">🎙</button></div>
+            <button type="button" id="analyzeRant" class="secondary wide">Analyze rant with AI</button>
+            <div id="aiAnalysis" class="ai-analysis hidden"></div>
+          </div>
           <div class="form-group">
             <label>What did you notice?</label>
             <div class="cue-grid">
-              <label><span>Physical cues</span><input id="physicalCues" placeholder="Jaw tight, chest, heat…"></label>
-              <label><span>Behavioral cues</span><input id="behavioralCues" placeholder="Voice, pacing, interrupting…"></label>
-              <label><span>Emotional cues</span><input id="emotionalCues" placeholder="Irritated, hurt, anxious…"></label>
-              <label><span>Cognitive cues</span><input id="cognitiveCues" placeholder="Blame, absolutist thought…"></label>
+              <div class="cue-field"><span>Physical cues</span><div class="cue-actions"><button type="button" class="pick-btn" data-cue-picker="physical">Pick</button><button type="button" class="mic-btn small" data-dictate-target="physicalCues">🎙</button></div><input id="physicalCues" placeholder="Jaw tight, chest, heat…"></div>
+              <div class="cue-field"><span>Behavioral cues</span><div class="cue-actions"><button type="button" class="pick-btn" data-cue-picker="behavioral">Pick</button><button type="button" class="mic-btn small" data-dictate-target="behavioralCues">🎙</button></div><input id="behavioralCues" placeholder="Voice, pacing, interrupting…"></div>
+              <div class="cue-field"><span>Emotional cues</span><div class="cue-actions"><button type="button" class="pick-btn" data-cue-picker="emotional">Pick</button><button type="button" class="mic-btn small" data-dictate-target="emotionalCues">🎙</button></div><input id="emotionalCues" placeholder="Hurt, anxious, embarrassed…"></div>
             </div>
           </div>
 
           <div class="form-group">
             <label for="consequenceInput">What did you feel or do?</label>
-            <textarea id="consequenceInput" rows="2" placeholder="Emotion, reaction, behavior, outcome."></textarea>
+            <div class="voice-field"><textarea id="consequenceInput" rows="2" placeholder="Emotion, reaction, behavior, outcome."></textarea><button type="button" class="mic-btn" data-dictate-target="consequenceInput">🎙</button></div>
           </div>
 
           <div class="form-group">
             <label for="strategyInput">What did you do to keep it from climbing?</label>
-            <input id="strategyInput" placeholder="Paused, walked away, reframed, breathed…">
+            <div class="voice-field"><input id="strategyInput" placeholder="Paused, walked away, reframed, breathed…"><button type="button" class="mic-btn" data-dictate-target="strategyInput">🎙</button></div>
           </div>
 
           <div class="form-group">
             <label for="realisticInput">Was the thought realistic or helpful?</label>
-            <textarea id="realisticInput" rows="2"></textarea>
+            <div class="voice-field"><textarea id="realisticInput" rows="2"></textarea><button type="button" class="mic-btn" data-dictate-target="realisticInput">🎙</button></div>
           </div>
 
           <div class="form-group">
             <label for="futureInput">What could you tell yourself next time?</label>
-            <textarea id="futureInput" rows="2"></textarea>
+            <div class="voice-field"><textarea id="futureInput" rows="2"></textarea><button type="button" class="mic-btn" data-dictate-target="futureInput">🎙</button></div>
           </div>
 
           <div class="form-group two-col">
@@ -204,6 +218,38 @@
           <button type="submit" class="primary">Save entry</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <div id="rantSheet" class="sheet hidden" aria-hidden="true">
+    <div class="sheet-backdrop" data-action="close-rant"></div>
+    <div class="sheet-panel rant-panel">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head"><div><div class="eyebrow">RAW CAPTURE</div><h2>Get it out.</h2></div><button class="icon-btn" data-action="close-rant">×</button></div>
+      <p class="rant-help">Say it however it comes out. The raw transcript stays raw unless you edit or delete it later.</p>
+      <div class="record-zone">
+        <button id="rantRecordBtn" type="button" class="rant-record">🎙 START RANT</button>
+        <div id="rantRecordingStatus" class="record-status">Ready</div>
+      </div>
+      <textarea id="rantTranscript" rows="10" placeholder="Your transcript will appear here. You can also type or edit it."></textarea>
+      <div id="rantRating" class="hidden">
+        <div class="form-group"><label>What were you feeling?</label><div id="rantEmotionButtons" class="emotion-buttons"></div><input id="rantOtherEmotion" class="hidden emotion-other" placeholder="Name another emotion"></div>
+        <div class="form-group"><label class="label-row"><span>Intensity</span><strong id="rantLevelDisplay">2</strong></label><div id="rantLevelButtons" class="level-buttons"></div></div>
+      </div>
+      <div class="save-row">
+        <button type="button" id="cancelRant" class="danger">Cancel</button>
+        <button type="button" id="saveRant" class="primary">Save rant</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="cuePickerModal" class="modal hidden">
+    <div class="modal-backdrop" data-action="close-cue-picker"></div>
+    <div class="modal-card">
+      <div class="section-head"><div><div class="eyebrow">CUE PICKER</div><h3 id="cuePickerTitle">Pick cues</h3></div><button class="icon-btn" data-action="close-cue-picker">×</button></div>
+      <p class="field-help">Choose any that fit. These are prompts, not diagnoses.</p>
+      <div id="cuePickerOptions" class="picker-options"></div>
+      <button id="applyCuePicker" type="button" class="primary wide">Add selected cues</button>
     </div>
   </div>
 
@@ -230,7 +276,7 @@
   <div id="authModal" class="modal auth-modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-card auth-card">
-      <div class="eyebrow">PATTERN TRAINER V4</div>
+      <div class="eyebrow">PATTERN TRAINER V6</div>
       <h2 id="authTitle">Sign in</h2>
       <p class="auth-intro">One username and password now connects your history on every device. Civilization advances by inches.</p>
       <form id="authForm">
