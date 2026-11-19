@@ -9,15 +9,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Pattern Trainer</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=7.0.0-calm1">
-  <link rel="stylesheet" href="calm.css?v=7.0.0-calm1">
+  <link rel="stylesheet" href="styles.css?v=8.0.0-checkin1">
+  <link rel="stylesheet" href="calm.css?v=8.0.0-checkin1">
 </head>
 <body>
   <div id="app">
     <header class="topbar">
       <div>
-        <div class="eyebrow">ANGER PATTERN TRAINER</div>
-        <h1 id="pageTitle">Catch it early.</h1><div id="appBuild">v7.0.0 · Calm Mode</div>
+        <div class="eyebrow">PATTERN TRAINER</div>
+        <h1 id="pageTitle">Check in.</h1><div id="appBuild">v8.0 · Check-ins</div>
       </div>
       <button id="backupBtn" class="icon-btn" title="Backup / restore">⋯</button>
     </header>
@@ -26,13 +26,17 @@
       <section id="homeView" class="view active">
         <div class="hero-card">
           <div class="hero-copy">
-            <div class="hero-kicker">The goal is not “never get angry.”</div>
-            <h2>Notice the first spark.</h2>
-            <p>Catch the thought, body cue, or irritation while it is still small enough to steer.</p>
+            <div class="hero-kicker">QUICK CHECK-IN</div>
+            <h2>How are you right now?</h2>
+            <p>Tap once to log it. An ordinary day counts, too.</p>
           </div>
-          <button class="rant-home giant" data-action="new-rant">🎙 RANT</button>
-          <button class="secondary wide" data-action="new-entry">LOG IT</button>
-          <button class="calm-home" data-calm-open="home">CALM DOWN<small>Short spoken guides. No need to figure it all out first.</small></button>
+          <div id="quickMoods" class="checkin-moods" aria-label="Log a mood"></div>
+          <p id="quickStatus" class="checkin-status" role="status"></p>
+          <button type="button" class="secondary wide" data-action="new-checkin">Log a thought or add details</button>
+          <div class="checkin-tools" aria-label="Optional tools">
+            <button type="button" class="text-btn" data-action="new-rant">Rant</button>
+            <button type="button" class="text-btn" data-calm-open="home">Calm</button>
+          </div>
         </div>
 
         <div class="card stats-card">
@@ -42,8 +46,8 @@
           </div>
           <div class="stats-grid">
             <div><strong id="weekCount">0</strong><span>entries</span></div>
-            <div><strong id="earlyCount">0</strong><span>caught at 1–3</span></div>
-            <div><strong id="highCount">0</strong><span>highest intensity</span></div>
+            <div><strong id="earlyCount">0</strong><span>quick check-ins</span></div>
+            <div><strong id="highCount">0</strong><span>actions rated</span></div>
           </div>
           <div id="weekNudge" class="nudge">Your first entry will start building your pattern map.</div>
         </div>
@@ -125,9 +129,62 @@
     <nav class="bottom-nav">
       <button data-nav="home" class="active"><span>⌂</span>Home</button>
       <button data-nav="history"><span>≡</span>History</button>
-      <button data-action="new-entry" class="nav-log"><span>＋</span>Log</button>
+      <button data-action="new-checkin" class="nav-log"><span>＋</span>Log</button>
       <button data-nav="review"><span>▦</span>Review</button>
     </nav>
+  </div>
+
+  <div id="checkinSheet" class="sheet hidden" role="dialog" aria-modal="true" aria-labelledby="checkinHeading">
+    <div class="sheet-backdrop" data-close-checkin></div>
+    <div class="sheet-panel">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head">
+        <h2 id="checkinHeading" tabindex="-1">Check in</h2>
+        <button type="button" class="icon-btn" data-close-checkin aria-label="Close check-in">×</button>
+      </div>
+      <form id="checkinForm">
+        <div class="form-group">
+          <label>What fits right now?</label>
+          <div id="checkinMoods" class="checkin-moods" aria-label="Choose any moods that fit"></div>
+          <label class="sr-only" for="checkinCustom">Other mood or your own word</label>
+          <input id="checkinCustom" maxlength="100" placeholder="Your own word (optional)">
+        </div>
+        <div class="form-group">
+          <label for="checkinThought">What’s on your mind?</label>
+          <textarea id="checkinThought" maxlength="4000" rows="2" placeholder="A thought is enough. No need to explain it."></textarea>
+        </div>
+        <details id="checkinDetails" class="checkin-details">
+          <summary>What came before? What did you try?</summary>
+          <div class="form-group">
+            <label for="checkinContext">What was happening just before?</label>
+            <select id="checkinContext"><option value="">Pick a context (optional)</option></select>
+            <label class="sr-only" for="checkinContextNote">Private context note</label>
+            <input id="checkinContextNote" maxlength="2000" placeholder="Add a private note (optional)">
+          </div>
+          <div class="form-group">
+            <label for="checkinAction">Pick an action</label>
+            <select id="checkinAction"><option value="">Nothing logged yet</option></select>
+            <label class="sr-only" for="checkinActionNote">Private action note</label>
+            <input id="checkinActionNote" maxlength="1000" placeholder="Something else you tried (optional)">
+          </div>
+          <div class="form-group">
+            <label for="checkinOutcome">Did it help?</label>
+            <select id="checkinOutcome" disabled>
+              <option value="">Not rated yet</option>
+              <option value="better">Better</option>
+              <option value="same">Same</option>
+              <option value="worse">Worse</option>
+            </select>
+            <div class="field-help">You can come back and answer later. No change counts, too.</div>
+          </div>
+        </details>
+        <p id="checkinFormStatus" class="checkin-status" role="status"></p>
+        <div class="save-row">
+          <button type="button" id="deleteCheckin" class="danger hidden">Delete</button>
+          <button type="submit" class="primary">Save check-in</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <div id="entrySheet" class="sheet hidden" aria-hidden="true">
@@ -270,6 +327,7 @@
         <span id="syncStatus">Cloud sync starting…</span>
         <small>Your account keeps your phone and computer on the same private history automatically.</small>
       </div>
+      <span id="checkinSyncStatus">Check-ins: waiting to sync.</span>
       <span id="calmSyncStatus">Calm: not synced yet.</span>
       <button id="checkAppUpdate" class="secondary wide">Check for app update</button>
       <button id="syncNow" class="secondary wide">Sync now</button>
@@ -283,7 +341,7 @@
   <div id="authModal" class="modal auth-modal hidden">
     <div class="modal-backdrop"></div>
     <div class="modal-card auth-card">
-      <div class="eyebrow">PATTERN TRAINER V7</div>
+      <div class="eyebrow">PATTERN TRAINER</div>
       <h2 id="authTitle">Sign in</h2>
       <p class="auth-intro">One username and password now connects your history on every device. Use the same account on your phone and computer.</p>
       <form id="authForm">
@@ -320,10 +378,11 @@
     </article>
   </template>
 
-  <script src="calm-content.js?v=7.0.0-calm1"></script>
-<script src="calm-core.js?v=7.0.0-calm1"></script>
-<script src="calm-store.js?v=7.0.0-calm1"></script>
-<script src="calm.js?v=7.0.0-calm1"></script>
-<script src="app.js?v=7.0.0-calm1"></script>
+  <script src="calm-content.js?v=8.0.0-checkin1"></script>
+<script src="calm-core.js?v=8.0.0-checkin1"></script>
+<script src="calm-store.js?v=8.0.0-checkin1"></script>
+<script src="calm.js?v=8.0.0-checkin1"></script>
+<script src="checkin.js?v=8.0.0-checkin1"></script>
+<script src="app.js?v=8.0.0-checkin1"></script>
 </body>
 </html>

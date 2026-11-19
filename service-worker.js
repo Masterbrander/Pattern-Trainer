@@ -1,9 +1,9 @@
 /* Static app shell only. Never cache API traffic, logins, or personal entries. */
-const CACHE='pattern-trainer-v7-calm-1';
-const VERSION='7.0.0-calm1';
+const CACHE='pattern-trainer-v8-checkin-1';
+const VERSION='8.0.0-checkin1';
 const BASE=self.registration.scope;
 const ASSETS=['./','index.html','styles.css?v='+VERSION,'calm.css?v='+VERSION,
- 'app.js?v='+VERSION,'calm-content.js?v='+VERSION,'calm-core.js?v='+VERSION,
+ 'checkin.js?v='+VERSION,'app.js?v='+VERSION,'calm-content.js?v='+VERSION,'calm-core.js?v='+VERSION,
  'calm-store.js?v='+VERSION,'calm.js?v='+VERSION,'manifest.json','icon.svg','calm-evidence.html'];
 const urls=ASSETS.map(path=>new URL(path,BASE).href);
 const allowed=new Set(urls);

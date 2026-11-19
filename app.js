@@ -1,3 +1,6 @@
+const APP_VERSION = "8.0.0-checkin1";
+let checkins;
+let checkinEditing=null, checkinOwner=null, checkinReturnFocus=null, checkinPendingLaunch=false, checkinBusy=false;
 
 const DB_NAME = 'patternTrainerDB';
 const STORE = 'entries';
@@ -34,13 +37,16 @@ function openDB(){
 }
 function txStore(mode='readonly'){ return db.transaction(STORE,mode).objectStore(STORE); }
 function currentUserId(){ return getSavedSession()?.user?.id || null; }
-function getAllEntries(){
-  return new Promise((resolve,reject)=>{
-    const owner=currentUserId();
+async function getAllEntries(){
+  const owner=currentUserId();
+  const legacy=await new Promise((resolve,reject)=>{
     const req = txStore().getAll();
     req.onsuccess=()=>resolve(req.result.filter(x=>!x._deleted && x._owner===owner).sort((a,b)=>new Date(b.timestamp)-new Date(a.timestamp)));
     req.onerror=()=>reject(req.error);
   });
+  const recent=await checkins?.list(owner).catch(()=>[])||[];
+  if(owner!==currentUserId())return [];
+  return [...legacy,...recent].sort((a,b)=>Date.parse(b.timestamp)-Date.parse(a.timestamp));
 }
 function putEntryLocal(entry){
   const owner=currentUserId();
@@ -126,6 +132,8 @@ async function createAccount(username,password){
   return signInAccount(username,password);
 }
 async function signOutAccount(){
+  closeCheckin(false);
+  await window.PatternReminders?.beforeSignOut();
   const token=await getAccessToken();
   if(token){ fetch(`${AUTH_URL}/logout`,{method:'POST',headers:authHeaders({Authorization:`Bearer ${token}`})}).catch(()=>{}); }
   saveSession(null);
@@ -201,6 +209,7 @@ async function syncCloud(){
   if(!getSavedSession()){ setSyncStatus('Sign in to sync'); return; }
   if(!navigator.onLine){ setSyncStatus('Offline • saved on this device'); return; }
   setSyncStatus('Syncing…');
+  syncCheckins();
   try{
     await flushPendingRantDeletes();
     const local=await getAllRecords();
@@ -220,7 +229,7 @@ async function syncCloud(){
     setSyncStatus(`Synced • ${new Date().toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`);
     await refreshHome();
     const active=qsa('.view.active')[0]?.id;
-    if(active==='historyView') await refreshHistory();
+    if(active==='historyView'){if(qs('#applyDates').dataset.customRange==='true')qs('#applyDates').click();else await refreshHistory(qs('.segmented button.active')?.dataset.range||'thisWeek');}
     if(active==='reviewView') await refreshReview();
   }catch(e){ setSyncStatus('Offline • saved on this device'); }
 }
@@ -324,14 +333,17 @@ function renderPattern(containerId, values, empty='Not enough data yet'){
 function escapeHtml(s){return String(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function makeEntryCard(entry){
   const node=qs('#entryTemplate').content.firstElementChild.cloneNode(true);
+  const isCheckin=entry.entryType==='checkin';
   const pill=node.querySelector('.level-pill');
-  pill.textContent=`Intensity ${entry.level}${entry.level<=3?' • caught early':''}`;
-  pill.classList.add(levelClass(entry.level));
+  pill.textContent=isCheckin?'Check-in':`Intensity ${entry.level}${entry.level<=3?' • caught early':''}`;
+  if(!isCheckin)pill.classList.add(levelClass(entry.level));
   node.querySelector('.entry-time').textContent=formatEntryTime(entry.timestamp);
   const emotion=(entry.emotions||[]).join(', ')||entry.emotion||'Unrated';
   node.querySelector('.entry-emotion').innerHTML=(entry.entryType==='rant'?'<span class="rant-badge">RANT</span>':'')+escapeHtml(emotion);
-  node.querySelector('.entry-event').textContent=entry.event || (entry.entryType==='rant'?'Raw rant':'Thought capture');
-  node.querySelector('.entry-thought').textContent=entry.thought || '—';
+  node.querySelector('.entry-event').textContent=isCheckin?(entry.contextNote||entry.contextTag||''):(entry.event || (entry.entryType==='rant'?'Raw rant':'Thought capture'));
+  const thought=node.querySelector('.entry-thought');
+  thought.textContent=entry.thought||(isCheckin?'':'—');
+  if(isCheckin&&!entry.thought)thought.classList.add('hidden');
   const cues=node.querySelector('.entry-cues');
   const chips=[
     ['physical',entry.physicalCues],['behavior',entry.behavioralCues],
@@ -341,7 +353,14 @@ function makeEntryCard(entry){
   chips.slice(0,3).forEach(([k,v])=>{
     const s=document.createElement('span');s.className='chip';s.textContent=`${k}: ${v}`;cues.appendChild(s);
   });
-  node.addEventListener('click',()=>openEntry(entry));
+  if(isCheckin){
+    const v=entry.actionTag||entry.actionNote;
+    if(v){const action=document.createElement('span');action.className='chip';action.textContent=v+(entry.outcome?` · ${entry.outcome[0].toUpperCase()}${entry.outcome.slice(1)}`:' · Not rated');cues.appendChild(action);}
+  }
+  const show=()=>{if(isCheckin)openCheckin(entry,node);else openEntry(entry);};
+  node.tabIndex=0;node.setAttribute('role','button');
+  node.addEventListener('click',show);
+  node.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show();}});
   return node;
 }
 function renderList(el, entries, emptyMsg){
@@ -355,11 +374,11 @@ async function refreshHome(){
   const s=startOfWeek(new Date()), e=endOfWeek(new Date());
   const week=within(entries,s,e);
   qs('#weekCount').textContent=week.length;
-  qs('#earlyCount').textContent=week.filter(x=>x.level<=3).length;
-  qs('#highCount').textContent=week.length?Math.max(...week.map(x=>x.level)):0;
+  qs('#earlyCount').textContent=week.filter(x=>x.entryType==='checkin').length;
+  qs('#highCount').textContent=week.filter(x=>x.entryType==='checkin'&&x.outcome).length;
   qs('#weekNudge').textContent=week.length
-    ? `${week.filter(x=>x.level<=3).length} of ${week.length} entries were caught at levels 1–3.`
-    : 'Your first entry will start building your pattern map.';
+    ? 'You can reopen any check-in to add what you tried and whether it helped.'
+    : 'Start with one word or a thought. No need to explain it.';
   renderList(qs('#recentList'),entries.slice(0,4),'No entries yet.');
 }
 
@@ -407,15 +426,16 @@ async function refreshReview(){
   qs('#reviewDateFrom').value=localDateStr(s);
   qs('#reviewDateTo').value=localDateStr(endLabel);
   qs('#rCount').textContent=rangeEntries.length;
-  qs('#rEarly').textContent=rangeEntries.length?`${Math.round(100*rangeEntries.filter(x=>x.level<=3).length/rangeEntries.length)}%`:'0%';
-  qs('#rHigh').textContent=rangeEntries.length?Math.max(...rangeEntries.map(x=>x.level)):0;
-  qs('#rAvg').textContent=rangeEntries.length?(rangeEntries.reduce((a,b)=>a+b.level,0)/rangeEntries.length).toFixed(1):'0';
+  const rated=rangeEntries.filter(x=>x.entryType!=='checkin'&&Number.isInteger(x.level));
+  qs('#rEarly').textContent=rated.length?`${Math.round(100*rated.filter(x=>x.level<=3).length/rated.length)}%`:'—';
+  qs('#rHigh').textContent=rated.length?Math.max(...rated.map(x=>x.level)):'—';
+  qs('#rAvg').textContent=rated.length?(rated.reduce((a,b)=>a+b.level,0)/rated.length).toFixed(1):'—';
   qs('#rDeletedRants').textContent=deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length;
   renderPattern('#emotionPatterns',rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[])));
-  renderPattern('#triggerPatterns',rangeEntries.map(x=>x.event));
+  renderPattern('#triggerPatterns',rangeEntries.map(x=>x.entryType==='checkin'?x.contextTag:x.event));
   renderPattern('#thoughtPatterns',rangeEntries.map(x=>x.thought));
   renderPattern('#cuePatterns',cueValues(rangeEntries));
-  renderPattern('#strategyPatterns',rangeEntries.map(x=>x.strategy));
+  renderPattern('#strategyPatterns',rangeEntries.map(x=>x.entryType==='checkin'?x.actionTag:x.strategy));
   renderList(qs('#reviewList'),rangeEntries,'No entries in this range.');
   if(window.PatternCalm) await PatternCalm.renderReview(s,e);
 }
@@ -424,11 +444,155 @@ function showView(name){
   qsa('.view').forEach(v=>v.classList.remove('active'));
   qs(`#${name}View`).classList.add('active');
   qsa('.bottom-nav button[data-nav]').forEach(b=>b.classList.toggle('active',b.dataset.nav===name));
-  qs('#pageTitle').textContent = name==='home'?'Catch it early.':name==='history'?'Your entries.':'Find the pattern.';
+  qs('#pageTitle').textContent = name==='home'?'Check in.':name==='history'?'Your entries.':'Find the pattern.';
   if(name==='home') refreshHome();
   if(name==='history') refreshHistory(qs('.segmented button.active')?.dataset.range || 'thisWeek');
   if(name==='review') refreshReview();
   window.scrollTo({top:0,behavior:'smooth'});
+}
+
+let checkinSyncQueue=Promise.resolve();
+function syncCheckins(){
+  if(!checkins||!currentUserId())return;
+  const owner=currentUserId();
+  checkinSyncQueue=checkinSyncQueue.catch(()=>{}).then(async()=>{
+    if(currentUserId()!==owner)return;
+    try{
+      const synced=await checkins.flush();
+      if(currentUserId()!==owner)return;
+      qs('#checkinSyncStatus').textContent=synced?'Check-ins synced.':'Check-ins saved on this device.';
+      await refreshHome();
+      if(qs('#historyView').classList.contains('active')){
+        if(qs('#applyDates').dataset.customRange==='true')qs('#applyDates').click();
+        else await refreshHistory(qs('.segmented button.active')?.dataset.range||'thisWeek');
+      }
+      if(qs('#reviewView').classList.contains('active'))await refreshReview();
+    }catch{
+      if(currentUserId()===owner)qs('#checkinSyncStatus').textContent='Check-ins saved on this device. Sync will retry.';
+    }
+  });
+  return checkinSyncQueue;
+}
+function chooseOption(select,values){
+  for(const v of values){const o=document.createElement('option');o.value=v;o.textContent=v;select.append(o);}
+}
+function checkinValues(){
+  return {
+    moodTags:qsa('#checkinMoods button[aria-pressed="true"]').map(b=>b.textContent),
+    customMood:qs('#checkinCustom').value,thought:qs('#checkinThought').value,
+    contextTag:qs('#checkinContext').value,contextNote:qs('#checkinContextNote').value,
+    actionTag:qs('#checkinAction').value,actionNote:qs('#checkinActionNote').value,
+    outcome:qs('#checkinOutcome').value
+  };
+}
+function updateCheckinOutcome(){
+  const result=qs('#checkinOutcome');
+  result.disabled=!qs('#checkinAction').value&&!qs('#checkinActionNote').value.trim();
+  if(result.disabled)result.value='';
+}
+function closeCheckin(restoreFocus=true){
+  const sheet=qs('#checkinSheet');
+  if(sheet.classList.contains('hidden'))return;
+  sheet.classList.add('hidden');qs('#app').inert=false;document.body.style.overflow='';
+  if(restoreFocus&&checkinReturnFocus?.isConnected)checkinReturnFocus.focus();
+  checkinReturnFocus=null;checkinEditing=null;checkinOwner=null;
+}
+function openCheckin(entry=null,button=document.activeElement){
+  const sheet=qs('#checkinSheet');
+  if(!sheet.classList.contains('hidden'))return;
+  if(!currentUserId()){checkinPendingLaunch=true;showAuth();return;}
+  checkinEditing=entry;checkinOwner=currentUserId();checkinReturnFocus=button;
+  qs('#checkinForm').reset();
+  qs('#checkinFormStatus').textContent='';
+  qs('#checkinHeading').textContent=entry?'Edit check-in':'Check in';
+  for(const b of qsa('#checkinMoods button'))b.setAttribute('aria-pressed',String(entry?.moodTags.includes(b.textContent)||false));
+  for(const [selector,key] of Object.entries({'#checkinCustom':'customMood','#checkinThought':'thought','#checkinContext':'contextTag',
+    '#checkinContextNote':'contextNote','#checkinAction':'actionTag','#checkinActionNote':'actionNote','#checkinOutcome':'outcome'})){
+    qs(selector).value=entry?.[key]||'';
+  }
+  qs('#checkinDetails').open=!!entry;
+  qs('#deleteCheckin').classList.toggle('hidden',!entry);
+  updateCheckinOutcome();
+  sheet.classList.remove('hidden');qs('#app').inert=true;document.body.style.overflow='hidden';
+  qs('#checkinHeading').focus();
+}
+function requestCheckinLaunch(){
+  if(!currentUserId()){checkinPendingLaunch=true;showAuth();return;}
+  if(!qs('#entrySheet').classList.contains('hidden')||!qs('#rantSheet').classList.contains('hidden'))return;
+  if(!qs('#checkinSheet').classList.contains('hidden'))return;
+  checkinPendingLaunch=false;showView('home');openCheckin();
+}
+async function saveCheckin(input,existing,owner,status,quick=false){
+  if(checkinBusy)return;
+  if(!owner||owner!==currentUserId()){showAuth();return;}
+  const row=PatternCheckin.build(input,existing,{now:new Date().toISOString(),id:uuid()});
+  if(!row){status.textContent='Add a mood, a thought, or something you noticed first.';return;}
+  checkinBusy=true;
+  try {
+    await checkins.save(row,owner);
+    if(owner!==currentUserId())return;
+    if(quick)status.textContent=`${row.moodTags[0]} logged.`;
+    else closeCheckin();
+    await refreshHome();
+    if(qs('#historyView').classList.contains('active')){
+      if(qs('#applyDates').dataset.customRange==='true')qs('#applyDates').click();
+      else await refreshHistory(qs('.segmented button.active')?.dataset.range||'thisWeek');
+    }
+    if(qs('#reviewView').classList.contains('active'))await refreshReview();
+    syncCheckins();
+  }catch {status.textContent='Could not save this check-in. Please try again.';}
+  finally{checkinBusy=false;}
+}
+function initCheckin(){
+  for(const mood of PatternCheckin.moods){
+    for(const [id,quick] of [['#quickMoods',true],['#checkinMoods',false]]){
+      const button=document.createElement('button');button.type='button';button.textContent=mood;
+      if(!quick)button.setAttribute('aria-pressed','false');
+      button.addEventListener('click',()=>quick
+        ?saveCheckin({moodTags:[mood]},null,currentUserId(),qs('#quickStatus'),true)
+        :button.setAttribute('aria-pressed',String(button.getAttribute('aria-pressed')!=='true')));
+      qs(id).append(button);
+    }
+  }
+  chooseOption(qs('#checkinContext'),PatternCheckin.contexts);
+  chooseOption(qs('#checkinAction'),PatternCheckin.actions);
+  qs('#checkinAction').addEventListener('change',updateCheckinOutcome);
+  qs('#checkinActionNote').addEventListener('input',updateCheckinOutcome);
+  qsa('[data-action="new-checkin"]').forEach(b=>b.addEventListener('click',()=>openCheckin(null,b)));
+  qsa('[data-close-checkin]').forEach(b=>b.addEventListener('click',()=>{if(!checkinBusy)closeCheckin();}));
+  qs('#checkinSheet').addEventListener('keydown',e=>{
+    if(e.key==='Escape'&&!checkinBusy){e.stopPropagation();closeCheckin();}
+    if(e.key!=='Tab')return;
+    const tabbable=[...e.currentTarget.querySelectorAll('button:not([disabled]),input:not([disabled]),textarea:not([disabled]),select:not([disabled]),summary')].filter(n=>n.getClientRects().length);
+    const first=tabbable[0],last=tabbable.at(-1);
+    if(e.shiftKey&&(document.activeElement===first||document.activeElement===qs('#checkinHeading'))){e.preventDefault();last?.focus();}
+    if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
+  });
+  qs('#checkinForm').addEventListener('submit',e=>{
+    e.preventDefault();saveCheckin(checkinValues(),checkinEditing,checkinOwner,qs('#checkinFormStatus'));
+  });
+  qs('#deleteCheckin').addEventListener('click',async()=>{
+    if(checkinBusy||!checkinEditing||!checkinOwner||!confirm('Delete this check-in?'))return;
+    const owner=checkinOwner;
+    checkinBusy=true;
+    try{
+      await checkins.save({...checkinEditing,updatedAt:new Date().toISOString()},owner,true);
+      if(currentUserId()!==owner)return;
+      closeCheckin();await refreshHome();
+      if(qs('#historyView').classList.contains('active')){
+        if(qs('#applyDates').dataset.customRange==='true')qs('#applyDates').click();
+        else await refreshHistory(qs('.segmented button.active')?.dataset.range||'thisWeek');
+      }
+      if(qs('#reviewView').classList.contains('active'))await refreshReview();
+      syncCheckins();
+    }catch{qs('#checkinFormStatus').textContent='Could not delete this check-in. Please try again.';}
+    finally{checkinBusy=false;}
+  });
+  window.addEventListener('pattern:account-change',()=>{
+    closeCheckin(false);qs('#quickStatus').textContent='';qs('#recentList').replaceChildren();qs('#historyList').replaceChildren();qs('#reviewList').replaceChildren();
+    if(!currentUserId())qs('#checkinSyncStatus').textContent='Sign in to sync check-ins.';
+    showView('home');
+  });
 }
 
 function setLevel(n){
@@ -599,14 +763,15 @@ function exportRangeReport(){
   getAllEntries().then(async entries=>{
     const s=new Date(reviewStart), e=new Date(reviewEnd), rangeEntries=within(entries,s,e);
     const endLabel=new Date(e); endLabel.setDate(endLabel.getDate()-1);
-    const early=rangeEntries.length?Math.round(100*rangeEntries.filter(x=>x.level<=3).length/rangeEntries.length):0;
-    const avg=rangeEntries.length?(rangeEntries.reduce((a,b)=>a+b.level,0)/rangeEntries.length).toFixed(1):'0';
-    const high=rangeEntries.length?Math.max(...rangeEntries.map(x=>x.level)):0;
+    const rated=rangeEntries.filter(x=>x.entryType!=='checkin'&&Number.isInteger(x.level));
+    const early=rated.length?Math.round(100*rated.filter(x=>x.level<=3).length/rated.length)+'%':'—';
+    const avg=rated.length?(rated.reduce((a,b)=>a+b.level,0)/rated.length).toFixed(1):'—';
+    const high=rated.length?Math.max(...rated.map(x=>x.level)):'—';
     const patt=v=>topPhrases(v).map(x=>`${x.text}${x.count>1?' ×'+x.count:''}`).join(', ')||'Not enough data yet';
     const esc=t=>String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const incidents=rangeEntries.map(x=>`<tr><td>${esc(formatEntryTime(x.timestamp))}</td><td>${esc(x.emotion)}</td><td>${x.level}</td><td>${esc(x.event)}</td><td>${esc(x.thought)}</td><td>${esc(x.strategy)}</td></tr>`).join('');
+    const incidents=rangeEntries.map(x=>`<tr><td>${esc(formatEntryTime(x.timestamp))}</td><td>${esc(x.emotions?.join(', ')||x.emotion)}</td><td>${Number.isInteger(x.level)?x.level:'—'}</td><td>${esc(x.contextTag||x.contextNote||x.event)}</td><td>${esc(x.thought)}</td><td>${esc([x.actionTag||x.actionNote||x.strategy,x.outcome].filter(Boolean).join(' · '))}</td></tr>`).join('');
     const calmReport=await PatternCalm.reportHTML(s,e);
-    w.document.write(`<!doctype html><title>Pattern Trainer Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}.calm-report{margin-top:26px;padding-top:16px;border-top:2px solid #ccd3dc}.calm-session-line{padding:9px 0;border-bottom:1px solid #ddd;font-size:12px;break-inside:avoid}.calm-session-line span,.calm-footnote{color:#52616c;font-size:11px}.calm-report h2{margin-top:8px}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${rangeEntries.length}</b>Entries</div><div class=m><b>${early}%</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div><div class=m><b>${deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length}</b>Deleted rants</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[]))))}</p><p><b>Triggers:</b> ${esc(patt(rangeEntries.map(x=>x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(rangeEntries.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(rangeEntries)))}</p><p><b>Strategies:</b> ${esc(patt(rangeEntries.map(x=>x.strategy)))}</p></div><h2>Incident log</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table>${calmReport}<p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
+    w.document.write(`<!doctype html><title>Pattern Trainer Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}.calm-report{margin-top:26px;padding-top:16px;border-top:2px solid #ccd3dc}.calm-session-line{padding:9px 0;border-bottom:1px solid #ddd;font-size:12px;break-inside:avoid}.calm-session-line span,.calm-footnote{color:#52616c;font-size:11px}.calm-report h2{margin-top:8px}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${rangeEntries.length}</b>Entries</div><div class=m><b>${early}</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div><div class=m><b>${deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length}</b>Deleted rants</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[]))))}</p><p><b>Triggers:</b> ${esc(patt(rangeEntries.map(x=>x.entryType==='checkin'?x.contextTag:x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(rangeEntries.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(rangeEntries)))}</p><p><b>Strategies:</b> ${esc(patt(rangeEntries.map(x=>x.entryType==='checkin'?x.actionTag:x.strategy)))}</p></div><h2>Journal</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table>${calmReport}<p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
   });
 }
 
@@ -659,12 +824,14 @@ function registerEvents(){
   });
 
   qsa('.segmented button').forEach(b=>b.addEventListener('click',()=>{
+    delete qs('#applyDates').dataset.customRange;
     qsa('.segmented button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
     refreshHistory(b.dataset.range);
   }));
 
   qs('#applyDates').addEventListener('click',async()=>{
     const f=qs('#dateFrom').value,t=qs('#dateTo').value;if(!f||!t)return;
+    qs('#applyDates').dataset.customRange='true';
     const entries=await getAllEntries();
     const s=new Date(`${f}T00:00:00`),e=new Date(`${t}T23:59:59.999`);
     renderList(qs('#historyList'),entries.filter(x=>{const d=new Date(x.timestamp);return d>=s&&d<=e;}),'No entries in this range.');
@@ -714,32 +881,36 @@ function registerEvents(){
     qs('#authSubmit').disabled=true; msg.textContent=authMode==='signup'?'Creating account…':'Signing in…';
     try{
       if(authMode==='signup') await createAccount(username,password); else await signInAccount(username,password);
-      await prepareAccountData(); hideAuth(); updateAccountUI(); await syncCloud();
+      await prepareAccountData(); hideAuth(); updateAccountUI(); if(checkinPendingLaunch)requestCheckinLaunch(); await syncCloud();
       qs('#authForm').reset();
     }catch(err){ msg.textContent=err.message||'Could not sign in.'; }
     finally{ qs('#authSubmit').disabled=false; }
   });
 
   qs('#exportJson').addEventListener('click',async()=>{
-    const entries=await getAllEntries();
-    downloadBlob(new Blob([JSON.stringify({version:2,exportedAt:new Date().toISOString(),entries,calmSessions:await PatternCalm.exportData()},null,2)],{type:'application/json'}),`pattern-trainer-backup-${localDateStr(new Date())}.json`);
+    const owner=currentUserId(),entries=await getAllEntries();
+    const cleanCheckins=(await checkins.list(owner)).map(({_rev,_dirty,_owner,...row})=>row);
+    if(owner!==currentUserId())return;
+    downloadBlob(new Blob([JSON.stringify({version:3,exportedAt:new Date().toISOString(),entries:entries.filter(x=>x.entryType!=='checkin'),checkins:cleanCheckins,calmSessions:await PatternCalm.exportData()},null,2)],{type:'application/json'}),`pattern-trainer-backup-${localDateStr(new Date())}.json`);
   });
   qs('#importJson').addEventListener('change',async e=>{
     const file=e.target.files[0]; if(!file)return;
     try{
       const data=JSON.parse(await file.text());
       if(!Array.isArray(data.entries)) throw new Error('Invalid backup');
-      for(const entry of data.entries) await putEntry(entry);
+      if(data.checkins!==undefined)await checkins.import(data.checkins,currentUserId());
+      for(const entry of data.entries) if(entry.entryType!=='checkin')await putEntry(entry);
+      syncCheckins();
       const calmCount=Array.isArray(data.calmSessions)?await PatternCalm.importData(data.calmSessions):0;
       PatternCalm.sync();
-      alert(`Restored ${data.entries.length} entries and ${calmCount} Calm sessions.`);
+      alert(`Restored ${data.entries.length} original entries, ${data.checkins?.length||0} check-ins and ${calmCount} Calm sessions.`);
       qs('#backupModal').classList.add('hidden'); refreshHome();
     }catch(err){ alert('Could not restore that backup file.'); }
     e.target.value='';
   });
   qs('#clearAll').addEventListener('click',async()=>{
     if(confirm('Erase local copies from this device? Cloud copies will download again on the next sync.')){
-      try{await PatternCalm.clearLocal();await clearCurrentAccountLocal();qs('#backupModal').classList.add('hidden');refreshHome();}catch(e){alert(e.message);}
+      try{await PatternCalm.clearLocal();await checkins.clear(currentUserId());await clearCurrentAccountLocal();qs('#backupModal').classList.add('hidden');refreshHome();}catch(e){alert(e.message);}
     }
   });
 }
@@ -752,7 +923,7 @@ async function checkAppUpdate(){
     const answer=await fetch('./version.json?check='+Date.now(),{cache:'no-store'});
     if(!answer.ok)throw new Error('No version response');
     const info=await answer.json();
-    if(info.version==='7.0.0-calm1'){alert('You are running v7.0.0 Calm Mode.');}
+    if(info.version===APP_VERSION){alert('You are running the latest Pattern Trainer.');}
     else if(confirm('An update is available. Save any open entry first. Reload now?')){
       if(reg?.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
       setTimeout(()=>location.reload(),800);
@@ -763,6 +934,11 @@ async function checkAppUpdate(){
 
 function handleDirectLaunch(){
   const params=new URLSearchParams(window.location.search);
+  if(params.get('action')==='checkin'){
+    requestCheckinLaunch();
+    params.delete('action');history.replaceState({},document.title,window.location.pathname+(params.size?'?'+params.toString():'')+window.location.hash);
+    return;
+  }
   // Literal action=rant is intentionally kept here for regression tests and Samsung/PWA shortcuts.
   if(params.toString().includes('action=rant') && params.get('action')==='rant'){
     openRant();
@@ -776,7 +952,10 @@ function handleDirectLaunch(){
   const rantLevels=qs('#rantLevelButtons');for(let i=1;i<=10;i++){const b=document.createElement('button');b.type='button';b.dataset.level=i;b.textContent=i;b.className=levelClass(i);b.addEventListener('click',()=>setRantLevel(i));rantLevels.appendChild(b);}
   setEmotions(['Irritation']);setRantLevel(2);
   await openDB();
+  checkins=new PatternCheckin.Store({url:SUPABASE_URL,key:SUPABASE_KEY,owner:currentUserId,token:getAccessToken});
   registerEvents();
+  initCheckin();
+  window.PatternReminders?.init({token:getAccessToken,owner:currentUserId,url:SUPABASE_URL,key:SUPABASE_KEY});
   PatternCalm.init({url:SUPABASE_URL,key:SUPABASE_KEY,owner:currentUserId,token:getAccessToken,stopCapture:suspendInputForCalm});
   updateAccountUI();
   if(getSavedSession()){
@@ -794,6 +973,7 @@ function handleDirectLaunch(){
   setInterval(()=>{ if(document.visibilityState==='visible' && navigator.onLine && getSavedSession()) syncCloud(); },60000);
   handleDirectLaunch();
   if('serviceWorker' in navigator){
+    navigator.serviceWorker.addEventListener('message',event=>{if(event.data?.type==='PATTERN_OPEN_CHECKIN')requestCheckinLaunch();});
     navigator.serviceWorker.register('./service-worker.js',{updateViaCache:'none'}).then(reg=>reg.update()).catch(()=>{});
   }
 })();

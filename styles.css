@@ -192,3 +192,20 @@ textarea:focus,input:focus{border-color:#4b6a86}
 /* Rant rating needs room above the sticky Save/Cancel controls. */
 .rant-panel{padding-bottom:calc(150px + env(safe-area-inset-bottom));}
 #rantRating{padding-bottom:24px;}
+
+
+/* Quick check-in: phone-friendly and distinct from the legacy worksheet. */
+.checkin-moods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.checkin-moods button{min-height:48px;border:1px solid var(--border);border-radius:14px;background:var(--panel2);color:var(--text);font-weight:800;padding:6px}
+.checkin-moods button[aria-pressed="true"]{border-color:var(--accent);background:#203747;color:#dff5ff}
+.checkin-status{font-size:.86rem;margin:.45rem 0;color:var(--accent2)}
+.checkin-status:empty{display:none}
+.checkin-tools{display:flex;justify-content:space-between;gap:.2rem;flex-wrap:wrap;margin-top:.75rem}
+.checkin-tools button{min-height:44px;padding:6px 9px}
+.checkin-details{background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:12px}
+.checkin-details summary{cursor:pointer;font-weight:800}
+#checkinForm select{display:block;width:100%;background:#0f141c;color:var(--text);border:1px solid var(--border);border-radius:14px;padding:12px;font:inherit}
+#checkinForm select:disabled{opacity:.55}
+#checkinForm input{margin-top:8px}
+#checkinSyncStatus{display:block;color:var(--muted);margin:.6rem 0;font-size:.86rem}
+.sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
