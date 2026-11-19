@@ -8,6 +8,21 @@ const outcomes=Object.freeze(['better','same','worse']);
 const trim=(value,limit)=>typeof value==='string'?value.trim().slice(0,limit):'';
 const tag=(value,list)=>list.includes(value)?value:null;
 const time=(value)=>typeof value==='string'&&Number.isFinite(Date.parse(value));
+const isEarlierEvent=row=>time(row?.timestamp)&&time(row?.capturedAt)&&Date.parse(row.timestamp)<Date.parse(row.capturedAt);
+function earlierTime(day,clock='',date='',now=new Date()){
+ let selected=new Date(now);
+ if(day==='today'||day==='yesterday'){
+  if(day==='yesterday')selected.setDate(selected.getDate()-1);
+  date=[selected.getFullYear(),String(selected.getMonth()+1).padStart(2,'0'),String(selected.getDate()).padStart(2,'0')].join('-');
+ }else if(day!=='other')return null;
+ const hourMinute=clock||'00:00';
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(hourMinute))return null;
+ selected=new Date(date+'T'+hourMinute);
+ const [year,month,dayOfMonth]=date.split('-').map(Number);
+ if(!(selected<now)||selected.getFullYear()!==year||selected.getMonth()+1!==month||selected.getDate()!==dayOfMonth)return null;
+ if(clock&&clock!==[selected.getHours(),selected.getMinutes()].map(n=>String(n).padStart(2,'0')).join(':'))return null;
+ return selected.toISOString();
+}
 function clean(value){
  const moodTags=Array.isArray(value.moodTags)?[...new Set(value.moodTags.filter(x=>moods.includes(x)))]:[];
  const actionTag=tag(value.actionTag,actions),actionNote=trim(value.actionNote,1000);
@@ -19,7 +34,8 @@ function clean(value){
 function build(input,existing,{now,id}){
  const entry=clean(input);
  if(!entry.emotions.length&&!entry.thought&&!entry.contextNote&&!entry.contextTag&&!entry.actionTag&&!entry.actionNote)return null;
- return {...entry,id:existing?.id||id,entryType:'checkin',timestamp:existing?.timestamp||now,capturedAt:existing?existing.capturedAt??null:now,updatedAt:now};
+ if(!existing&&input.occurredAt!==undefined&&!(time(input.occurredAt)&&Date.parse(input.occurredAt)<Date.parse(now)))return null;
+ return {...entry,id:existing?.id||id,entryType:'checkin',timestamp:existing?.timestamp||input.occurredAt||now,capturedAt:existing?existing.capturedAt??null:now,updatedAt:now};
 }
 function toCloud(row,owner){
  const r=clean(row);
@@ -69,7 +85,7 @@ class Store{
  async import(rows,owner){
   if(!owner||!Array.isArray(rows)||rows.length>50000)throw Error('Invalid check-in data.');
   if(rows.some(r=>!r||!uuid.test(r.id)||!time(r.timestamp))) throw Error('Invalid check-in backup record.');
-  for(const row of rows)await this.save({...row,capturedAt:null,updatedAt:new Date().toISOString()},owner);
+  for(const row of rows)await this.save({...row,capturedAt:isEarlierEvent(row)?row.capturedAt:null,updatedAt:new Date().toISOString()},owner);
  }
  async clear(owner){
   if(!owner)return;
@@ -119,5 +135,5 @@ class Store{
   return owner===this.options.owner();
  }
 }
-return {moods,contexts,actions,outcomes,build,toCloud,fromCloud,Store};
+return {moods,contexts,actions,outcomes,build,earlierTime,isEarlierEvent,toCloud,fromCloud,Store};
 });

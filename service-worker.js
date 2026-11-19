@@ -1,6 +1,6 @@
 /* Static app shell only. Never cache API traffic, logins, or personal entries. */
-const CACHE='pattern-trainer-v8-checkin-1';
-const VERSION='8.0.0-checkin1';
+const CACHE='pattern-trainer-v8-checkin-2';
+const VERSION='8.0.0-checkin2';
 const BASE=self.registration.scope;
 const ASSETS=['./','index.html','styles.css?v='+VERSION,'calm.css?v='+VERSION,
  'checkin.js?v='+VERSION,'app.js?v='+VERSION,'calm-content.js?v='+VERSION,'calm-core.js?v='+VERSION,

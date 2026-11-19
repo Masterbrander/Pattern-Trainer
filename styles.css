@@ -200,6 +200,7 @@ textarea:focus,input:focus{border-color:#4b6a86}
 .checkin-moods button[aria-pressed="true"]{border-color:var(--accent);background:#203747;color:#dff5ff}
 .checkin-status{font-size:.86rem;margin:.45rem 0;color:var(--accent2)}
 .checkin-status:empty{display:none}
+.earlier-event-button{min-height:44px;margin:0 0 12px}
 .checkin-tools{display:flex;justify-content:space-between;gap:.2rem;flex-wrap:wrap;margin-top:.75rem}
 .checkin-tools button{min-height:44px;padding:6px 9px}
 .checkin-details{background:var(--panel2);border:1px solid var(--border);border-radius:14px;padding:12px}

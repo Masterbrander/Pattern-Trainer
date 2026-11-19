@@ -9,8 +9,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Pattern Trainer</title>
   <link rel="manifest" href="manifest.json">
-  <link rel="stylesheet" href="styles.css?v=8.0.0-checkin1">
-  <link rel="stylesheet" href="calm.css?v=8.0.0-checkin1">
+  <link rel="stylesheet" href="styles.css?v=8.0.0-checkin2">
+  <link rel="stylesheet" href="calm.css?v=8.0.0-checkin2">
 </head>
 <body>
   <div id="app">
@@ -38,6 +38,8 @@
             <button type="button" class="text-btn" data-calm-open="home">Calm</button>
           </div>
         </div>
+
+        <button type="button" class="secondary wide earlier-event-button" data-action="earlier-event">Log an earlier event</button>
 
         <div class="card stats-card">
           <div class="section-head">
@@ -143,8 +145,25 @@
         <button type="button" class="icon-btn" data-close-checkin aria-label="Close check-in">×</button>
       </div>
       <form id="checkinForm">
+        <p id="checkinEventDateSummary" class="field-help hidden"></p>
+        <div id="checkinEventWhen" class="form-group hidden">
+          <label for="checkinEventDay">When did it happen?</label>
+          <select id="checkinEventDay">
+            <option value="today">Earlier today</option>
+            <option value="yesterday">Yesterday</option>
+            <option value="other">Pick a date</option>
+          </select>
+          <div id="checkinEventCustomDate" class="form-group hidden">
+            <label for="checkinEventDate">Event date</label>
+            <input id="checkinEventDate" type="date">
+          </div>
+          <div class="form-group">
+            <label for="checkinEventTime">Exact time (optional)</label>
+            <input id="checkinEventTime" type="time">
+          </div>
+        </div>
         <div class="form-group">
-          <label>What fits right now?</label>
+          <label id="checkinMoodPrompt">What fits right now?</label>
           <div id="checkinMoods" class="checkin-moods" aria-label="Choose any moods that fit"></div>
           <label class="sr-only" for="checkinCustom">Other mood or your own word</label>
           <input id="checkinCustom" maxlength="100" placeholder="Your own word (optional)">
@@ -181,7 +200,7 @@
         <p id="checkinFormStatus" class="checkin-status" role="status"></p>
         <div class="save-row">
           <button type="button" id="deleteCheckin" class="danger hidden">Delete</button>
-          <button type="submit" class="primary">Save check-in</button>
+          <button type="submit" id="saveCheckin" class="primary">Save check-in</button>
         </div>
       </form>
     </div>
@@ -378,11 +397,11 @@
     </article>
   </template>
 
-  <script src="calm-content.js?v=8.0.0-checkin1"></script>
-<script src="calm-core.js?v=8.0.0-checkin1"></script>
-<script src="calm-store.js?v=8.0.0-checkin1"></script>
-<script src="calm.js?v=8.0.0-checkin1"></script>
-<script src="checkin.js?v=8.0.0-checkin1"></script>
-<script src="app.js?v=8.0.0-checkin1"></script>
+  <script src="calm-content.js?v=8.0.0-checkin2"></script>
+<script src="calm-core.js?v=8.0.0-checkin2"></script>
+<script src="calm-store.js?v=8.0.0-checkin2"></script>
+<script src="calm.js?v=8.0.0-checkin2"></script>
+<script src="checkin.js?v=8.0.0-checkin2"></script>
+<script src="app.js?v=8.0.0-checkin2"></script>
 </body>
 </html>

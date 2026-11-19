@@ -1,6 +1,6 @@
-const APP_VERSION = "8.0.0-checkin1";
+const APP_VERSION = "8.0.0-checkin2";
 let checkins;
-let checkinEditing=null, checkinOwner=null, checkinReturnFocus=null, checkinPendingLaunch=false, checkinBusy=false;
+let checkinEditing=null, checkinOwner=null, checkinReturnFocus=null, checkinPendingLaunch=null, checkinBusy=false, checkinEarlier=false;
 
 const DB_NAME = 'patternTrainerDB';
 const STORE = 'entries';
@@ -269,9 +269,11 @@ function startOfWeek(d){
 }
 function endOfWeek(d){ const x=startOfWeek(d); x.setDate(x.getDate()+7); return x; }
 function formatShortDate(d){ return d.toLocaleDateString(undefined,{month:'short',day:'numeric'}); }
-function formatEntryTime(ts){
-  const d=new Date(ts);
-  return d.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+function formatEntryTime(entry){
+  const date=new Date(entry.timestamp);
+  const day={weekday:'short',month:'short',day:'numeric'};
+  if(entry.entryType==='checkin'&&PatternCheckin.isEarlierEvent(entry)&&!date.getHours()&&!date.getMinutes())return date.toLocaleDateString(undefined,day);
+  return date.toLocaleString(undefined,{...day,hour:'numeric',minute:'2-digit'});
 }
 function within(entries,start,end){
   return entries.filter(e=>{const t=new Date(e.timestamp); return t>=start && t<end;});
@@ -335,9 +337,10 @@ function makeEntryCard(entry){
   const node=qs('#entryTemplate').content.firstElementChild.cloneNode(true);
   const isCheckin=entry.entryType==='checkin';
   const pill=node.querySelector('.level-pill');
-  pill.textContent=isCheckin?'Check-in':`Intensity ${entry.level}${entry.level<=3?' • caught early':''}`;
+  const earlier=isCheckin&&PatternCheckin.isEarlierEvent(entry);
+  pill.textContent=isCheckin?(earlier?'Earlier event':'Check-in'):`Intensity ${entry.level}${entry.level<=3?' • caught early':''}`;
   if(!isCheckin)pill.classList.add(levelClass(entry.level));
-  node.querySelector('.entry-time').textContent=formatEntryTime(entry.timestamp);
+  node.querySelector('.entry-time').textContent=formatEntryTime(entry);
   const emotion=(entry.emotions||[]).join(', ')||entry.emotion||'Unrated';
   node.querySelector('.entry-emotion').innerHTML=(entry.entryType==='rant'?'<span class="rant-badge">RANT</span>':'')+escapeHtml(emotion);
   node.querySelector('.entry-event').textContent=isCheckin?(entry.contextNote||entry.contextTag||''):(entry.event || (entry.entryType==='rant'?'Raw rant':'Thought capture'));
@@ -377,7 +380,7 @@ async function refreshHome(){
   qs('#earlyCount').textContent=week.filter(x=>x.entryType==='checkin').length;
   qs('#highCount').textContent=week.filter(x=>x.entryType==='checkin'&&x.outcome).length;
   qs('#weekNudge').textContent=week.length
-    ? 'You can reopen any check-in to add what you tried and whether it helped.'
+    ? 'You can reopen an entry to add what you tried and whether it helped.'
     : 'Start with one word or a thought. No need to explain it.';
   renderList(qs('#recentList'),entries.slice(0,4),'No entries yet.');
 }
@@ -495,16 +498,28 @@ function closeCheckin(restoreFocus=true){
   if(sheet.classList.contains('hidden'))return;
   sheet.classList.add('hidden');qs('#app').inert=false;document.body.style.overflow='';
   if(restoreFocus&&checkinReturnFocus?.isConnected)checkinReturnFocus.focus();
-  checkinReturnFocus=null;checkinEditing=null;checkinOwner=null;
+  checkinReturnFocus=null;checkinEditing=null;checkinOwner=null;checkinEarlier=false;
 }
-function openCheckin(entry=null,button=document.activeElement){
+function openCheckin(entry=null,button=document.activeElement,earlier=false){
   const sheet=qs('#checkinSheet');
   if(!sheet.classList.contains('hidden'))return;
-  if(!currentUserId()){checkinPendingLaunch=true;showAuth();return;}
+  if(!currentUserId()){checkinPendingLaunch=earlier?'earlier':'now';showAuth();return;}
+  checkinEarlier=entry?PatternCheckin.isEarlierEvent(entry):earlier;
   checkinEditing=entry;checkinOwner=currentUserId();checkinReturnFocus=button;
   qs('#checkinForm').reset();
   qs('#checkinFormStatus').textContent='';
-  qs('#checkinHeading').textContent=entry?'Edit check-in':'Check in';
+  qs('#checkinHeading').textContent=checkinEarlier?(entry?'Edit earlier event':'Log an earlier event'):(entry?'Edit check-in':'Check in');
+  qs('#checkinMoodPrompt').textContent=checkinEarlier?'How did you feel then?':'What fits right now?';
+  qs('#checkinMoods').setAttribute('aria-label',checkinEarlier?'Choose any moods you felt then':'Choose any moods that fit');
+  qs('label[for="checkinThought"]').textContent=checkinEarlier?'What happened?':'What’s on your mind?';
+  qs('#checkinThought').placeholder=checkinEarlier?'A quick note is enough.':'A thought is enough. No need to explain it.';
+  qs('#saveCheckin').textContent=checkinEarlier?'Save event':'Save check-in';
+  qs('button[data-close-checkin]').setAttribute('aria-label',checkinEarlier?'Close earlier event':'Close check-in');
+  qs('#checkinEventWhen').classList.toggle('hidden',!checkinEarlier||!!entry);
+  qs('#checkinEventDateSummary').classList.toggle('hidden',!checkinEarlier||!entry);
+  qs('#checkinEventDateSummary').textContent=checkinEarlier&&entry?formatEntryTime(entry):'';
+  qs('#checkinEventCustomDate').classList.add('hidden');
+  qs('#checkinEventDate').max=localDateStr(new Date());
   for(const b of qsa('#checkinMoods button'))b.setAttribute('aria-pressed',String(entry?.moodTags.includes(b.textContent)||false));
   for(const [selector,key] of Object.entries({'#checkinCustom':'customMood','#checkinThought':'thought','#checkinContext':'contextTag',
     '#checkinContextNote':'contextNote','#checkinAction':'actionTag','#checkinActionNote':'actionNote','#checkinOutcome':'outcome'})){
@@ -516,23 +531,33 @@ function openCheckin(entry=null,button=document.activeElement){
   sheet.classList.remove('hidden');qs('#app').inert=true;document.body.style.overflow='hidden';
   qs('#checkinHeading').focus();
 }
-function requestCheckinLaunch(){
-  if(!currentUserId()){checkinPendingLaunch=true;showAuth();return;}
+function requestCheckinLaunch(earlier=false){
+  if(!currentUserId()){checkinPendingLaunch=earlier?'earlier':'now';showAuth();return;}
   if(!qs('#entrySheet').classList.contains('hidden')||!qs('#rantSheet').classList.contains('hidden'))return;
   if(!qs('#checkinSheet').classList.contains('hidden'))return;
-  checkinPendingLaunch=false;showView('home');openCheckin();
+  checkinPendingLaunch=null;showView('home');openCheckin(null,undefined,earlier);
 }
 async function saveCheckin(input,existing,owner,status,quick=false){
   if(checkinBusy)return;
   if(!owner||owner!==currentUserId()){showAuth();return;}
-  const row=PatternCheckin.build(input,existing,{now:new Date().toISOString(),id:uuid()});
+  const now=new Date();
+  if(input.eventTime){
+    const {day,clock,date}=input.eventTime;
+    const occurredAt=PatternCheckin.earlierTime(day,clock,date,now);
+    if(!occurredAt){status.textContent='Choose a valid date and time before now.';return;}
+    input={...input,occurredAt};
+  }
+  const row=PatternCheckin.build(input,existing,{now:now.toISOString(),id:uuid()});
   if(!row){status.textContent='Add a mood, a thought, or something you noticed first.';return;}
   checkinBusy=true;
   try {
     await checkins.save(row,owner);
     if(owner!==currentUserId())return;
     if(quick)status.textContent=`${row.moodTags[0]} logged.`;
-    else closeCheckin();
+    else {
+      if(!existing&&PatternCheckin.isEarlierEvent(row))qs('#quickStatus').textContent='Earlier event saved. Find it in History.';
+      closeCheckin();
+    }
     await refreshHome();
     if(qs('#historyView').classList.contains('active')){
       if(qs('#applyDates').dataset.customRange==='true')qs('#applyDates').click();
@@ -559,6 +584,8 @@ function initCheckin(){
   qs('#checkinAction').addEventListener('change',updateCheckinOutcome);
   qs('#checkinActionNote').addEventListener('input',updateCheckinOutcome);
   qsa('[data-action="new-checkin"]').forEach(b=>b.addEventListener('click',()=>openCheckin(null,b)));
+  qsa('[data-action="earlier-event"]').forEach(b=>b.addEventListener('click',()=>openCheckin(null,b,true)));
+  qs('#checkinEventDay').addEventListener('change',()=>qs('#checkinEventCustomDate').classList.toggle('hidden',qs('#checkinEventDay').value!=='other'));
   qsa('[data-close-checkin]').forEach(b=>b.addEventListener('click',()=>{if(!checkinBusy)closeCheckin();}));
   qs('#checkinSheet').addEventListener('keydown',e=>{
     if(e.key==='Escape'&&!checkinBusy){e.stopPropagation();closeCheckin();}
@@ -569,10 +596,13 @@ function initCheckin(){
     if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}
   });
   qs('#checkinForm').addEventListener('submit',e=>{
-    e.preventDefault();saveCheckin(checkinValues(),checkinEditing,checkinOwner,qs('#checkinFormStatus'));
+    e.preventDefault();
+    const values=checkinValues();
+    if(checkinEarlier&&!checkinEditing)values.eventTime={day:qs('#checkinEventDay').value,clock:qs('#checkinEventTime').value,date:qs('#checkinEventDate').value};
+    saveCheckin(values,checkinEditing,checkinOwner,qs('#checkinFormStatus'));
   });
   qs('#deleteCheckin').addEventListener('click',async()=>{
-    if(checkinBusy||!checkinEditing||!checkinOwner||!confirm('Delete this check-in?'))return;
+    if(checkinBusy||!checkinEditing||!checkinOwner||!confirm(checkinEarlier?'Delete this earlier event?':'Delete this check-in?'))return;
     const owner=checkinOwner;
     checkinBusy=true;
     try{
@@ -769,7 +799,7 @@ function exportRangeReport(){
     const high=rated.length?Math.max(...rated.map(x=>x.level)):'—';
     const patt=v=>topPhrases(v).map(x=>`${x.text}${x.count>1?' ×'+x.count:''}`).join(', ')||'Not enough data yet';
     const esc=t=>String(t||'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-    const incidents=rangeEntries.map(x=>`<tr><td>${esc(formatEntryTime(x.timestamp))}</td><td>${esc(x.emotions?.join(', ')||x.emotion)}</td><td>${Number.isInteger(x.level)?x.level:'—'}</td><td>${esc(x.contextTag||x.contextNote||x.event)}</td><td>${esc(x.thought)}</td><td>${esc([x.actionTag||x.actionNote||x.strategy,x.outcome].filter(Boolean).join(' · '))}</td></tr>`).join('');
+    const incidents=rangeEntries.map(x=>`<tr><td>${esc(formatEntryTime(x))}</td><td>${esc(x.emotions?.join(', ')||x.emotion)}</td><td>${Number.isInteger(x.level)?x.level:'—'}</td><td>${esc(x.contextTag||x.contextNote||x.event)}</td><td>${esc(x.thought)}</td><td>${esc([x.actionTag||x.actionNote||x.strategy,x.outcome].filter(Boolean).join(' · '))}</td></tr>`).join('');
     const calmReport=await PatternCalm.reportHTML(s,e);
     w.document.write(`<!doctype html><title>Pattern Trainer Report</title><style>body{font:14px system-ui;margin:32px;color:#18202b}h1{margin-bottom:4px}.sub{color:#667085}.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:24px 0}.m{border:1px solid #ccd3dc;border-radius:12px;padding:14px}.m b{font-size:24px;display:block}.patterns{border:1px solid #ccd3dc;border-radius:12px;padding:16px;margin-bottom:20px}.patterns p{margin:8px 0}table{border-collapse:collapse;width:100%;font-size:11px}th,td{border-bottom:1px solid #ddd;text-align:left;vertical-align:top;padding:8px}th{background:#f2f4f7}.calm-report{margin-top:26px;padding-top:16px;border-top:2px solid #ccd3dc}.calm-session-line{padding:9px 0;border-bottom:1px solid #ddd;font-size:12px;break-inside:avoid}.calm-session-line span,.calm-footnote{color:#52616c;font-size:11px}.calm-report h2{margin-top:8px}@media print{body{margin:12mm}.no-print{display:none}}</style><h1>Pattern Trainer - Review</h1><div class=sub>${formatShortDate(s)} - ${formatShortDate(endLabel)}</div><div class=metrics><div class=m><b>${rangeEntries.length}</b>Entries</div><div class=m><b>${early}</b>Caught at 1-3</div><div class=m><b>${high}</b>Highest intensity</div><div class=m><b>${avg}</b>Average intensity</div><div class=m><b>${deletedRants.filter(x=>{const d=new Date(x.deleted_at);return d>=s&&d<e;}).length}</b>Deleted rants</div></div><div class=patterns><h2>Patterns</h2><p><b>Starting states:</b> ${esc(patt(rangeEntries.flatMap(x=>x.emotions?.length?x.emotions:(x.emotion?[x.emotion]:[]))))}</p><p><b>Triggers:</b> ${esc(patt(rangeEntries.map(x=>x.entryType==='checkin'?x.contextTag:x.event)))}</p><p><b>Thoughts:</b> ${esc(patt(rangeEntries.map(x=>x.thought)))}</p><p><b>Cues:</b> ${esc(patt(cueValues(rangeEntries)))}</p><p><b>Strategies:</b> ${esc(patt(rangeEntries.map(x=>x.entryType==='checkin'?x.actionTag:x.strategy)))}</p></div><h2>Journal</h2><table><thead><tr><th>Date/time</th><th>Starting state</th><th>Intensity</th><th>Trigger</th><th>Thought</th><th>Strategy</th></tr></thead><tbody>${incidents}</tbody></table>${calmReport}<p class=no-print><button onclick=window.print()>Save / Print PDF</button></p>`); w.document.close();
   });
@@ -881,7 +911,7 @@ function registerEvents(){
     qs('#authSubmit').disabled=true; msg.textContent=authMode==='signup'?'Creating account…':'Signing in…';
     try{
       if(authMode==='signup') await createAccount(username,password); else await signInAccount(username,password);
-      await prepareAccountData(); hideAuth(); updateAccountUI(); if(checkinPendingLaunch)requestCheckinLaunch(); await syncCloud();
+      await prepareAccountData(); hideAuth(); updateAccountUI(); if(checkinPendingLaunch)requestCheckinLaunch(checkinPendingLaunch==='earlier'); await syncCloud();
       qs('#authForm').reset();
     }catch(err){ msg.textContent=err.message||'Could not sign in.'; }
     finally{ qs('#authSubmit').disabled=false; }
